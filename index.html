@@ -71,7 +71,6 @@
 // --- CORE APP LOGIC (VERSION 5) ---
 
 const config = {
-    // Using v5 to avoid conflicts with old cached data
     DRIVE_API_KEY_STORAGE: 'superdrivehub_v5_google_api_key',
     DRIVE_CLIENT_ID_STORAGE: 'superdrivehub_v5_google_client_id',
     TMDB_API_KEY_STORAGE: 'superdrivehub_v5_tmdb_api_key',
@@ -143,7 +142,6 @@ authButton.addEventListener('click', () => {
 
 logoutButton.addEventListener('click', () => {
     Object.values(config).forEach(key => localStorage.removeItem(key));
-    // Also clear the new track preferences
     Object.keys(localStorage).forEach(key => {
         if (key.startsWith('track_prefs_')) {
             localStorage.removeItem(key);
