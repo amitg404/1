@@ -3,10 +3,9 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Super Drive Hub v5.1</title>
+    <title>Super Drive Hub v6</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://apis.google.com/js/api.js"></script>
-    <script src="https://accounts.google.com/gsi/client"></script>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
     <style>
         body { font-family: 'Inter', sans-serif; }
@@ -68,21 +67,20 @@
     </div>
 
 <script>
-// --- CORE APP LOGIC (VERSION 5.1 - Bug Fix) ---
+// --- CORE APP LOGIC (VERSION 6 - Redirect Auth) ---
 
 const config = {
-    DRIVE_API_KEY_STORAGE: 'superdrivehub_v5_google_api_key',
-    DRIVE_CLIENT_ID_STORAGE: 'superdrivehub_v5_google_client_id',
-    TMDB_API_KEY_STORAGE: 'superdrivehub_v5_tmdb_api_key',
-    LIBRARY_STORAGE: 'superdrivehub_v5_library_cache',
-    CONTINUE_WATCHING_STORAGE: 'superdrivehub_v5_continue_watching',
+    DRIVE_API_KEY_STORAGE: 'superdrivehub_v6_google_api_key',
+    DRIVE_CLIENT_ID_STORAGE: 'superdrivehub_v6_google_client_id',
+    TMDB_API_KEY_STORAGE: 'superdrivehub_v6_tmdb_api_key',
+    LIBRARY_STORAGE: 'superdrivehub_v6_library_cache',
+    CONTINUE_WATCHING_STORAGE: 'superdrivehub_v6_continue_watching',
     TMDB_BASE_URL: 'https://api.themoviedb.org/3',
     TMDB_IMG_URL: 'https://image.tmdb.org/t/p/w500',
     MAIN_FOLDER_NAME: 'Entertainment'
 };
 
 let state = {
-    gapiInited: false, gsiInited: false, tokenClient: null,
     library: { movies: [], filmSeries: [], tvSeries: [] },
     continueWatching: [],
     activeDetailItem: null,
@@ -103,10 +101,7 @@ const logoutButton = document.getElementById('logoutButton');
 const scanButton = document.getElementById('scanButton');
 
 // --- UI HELPER FUNCTIONS ---
-// MOVED THIS FUNCTION UP TO FIX THE INITIALIZATION BUG
-function updateStatus(message) {
-    loadingStatus.innerText = message;
-}
+function updateStatus(message) { loadingStatus.innerText = message; }
 
 // --- INITIALIZATION ---
 window.onload = () => {
@@ -119,13 +114,8 @@ window.onload = () => {
     const continueWatchingData = localStorage.getItem(config.CONTINUE_WATCHING_STORAGE);
     if (continueWatchingData) state.continueWatching = JSON.parse(continueWatchingData);
 
-    if (document.getElementById('apiKey').value && document.getElementById('clientId').value) {
-        updateStatus("Loading Google Libraries...");
-        gapiLoaded();
-        gisLoaded();
-    } else {
-        showCredentialsScreen();
-    }
+    // This is the new Redirect Authentication flow
+    handleRedirect();
 };
 
 function showCredentialsScreen() {
@@ -142,7 +132,8 @@ authButton.addEventListener('click', () => {
         localStorage.setItem(config.DRIVE_API_KEY_STORAGE, apiKey);
         localStorage.setItem(config.DRIVE_CLIENT_ID_STORAGE, clientId);
         localStorage.setItem(config.TMDB_API_KEY_STORAGE, tmdbApiKey);
-        window.location.reload();
+        // After saving, start the login process
+        redirectToGoogleLogin();
     } else { alert('Please enter all three API keys.'); }
 });
 
@@ -153,11 +144,51 @@ logoutButton.addEventListener('click', () => {
             localStorage.removeItem(key);
         }
     });
-    window.location.reload();
+    window.location.href = window.location.pathname; // Reload without hash
 });
 
-// --- GOOGLE API & AUTHENTICATION ---
-function gapiLoaded() { gapi.load('client', initializeGapiClient); }
+// --- GOOGLE API & AUTHENTICATION (REDIRECT FLOW) ---
+function handleRedirect() {
+    const fragment = new URLSearchParams(window.location.hash.substring(1));
+    const accessToken = fragment.get('access_token');
+
+    if (accessToken) {
+        // We have a token from the redirect!
+        gapi.client.setToken({ access_token: accessToken });
+        
+        // Clean the URL so the token isn't visible
+        window.history.replaceState({}, document.title, window.location.pathname);
+        
+        // Now that we're authenticated, load the GAPI client
+        gapi.load('client', initializeGapiClient);
+
+    } else {
+        // No token, check if we have credentials saved
+        if (localStorage.getItem(config.DRIVE_CLIENT_ID_STORAGE)) {
+            showCredentialsScreen();
+        } else {
+            // No keys saved, definitely show the credentials screen.
+            showCredentialsScreen();
+        }
+    }
+}
+
+function redirectToGoogleLogin() {
+    const CLIENT_ID = localStorage.getItem(config.DRIVE_CLIENT_ID_STORAGE);
+    // Use the current location as the redirect URI
+    const REDIRECT_URI = window.location.origin + window.location.pathname;
+    const SCOPE = 'https://www.googleapis.com/auth/drive.readonly';
+    
+    const authUrl = `https://accounts.google.com/o/oauth2/v2/auth?` +
+        `client_id=${CLIENT_ID}` +
+        `&redirect_uri=${encodeURIComponent(REDIRECT_URI)}` +
+        `&scope=${SCOPE}` +
+        `&response_type=token` +
+        `&include_granted_scopes=true`;
+        
+    // Navigate to the Google login page
+    window.location.href = authUrl;
+}
 
 async function initializeGapiClient() {
     try {
@@ -166,54 +197,11 @@ async function initializeGapiClient() {
             apiKey: localStorage.getItem(config.DRIVE_API_KEY_STORAGE),
             discoveryDocs: ['https://www.googleapis.com/discovery/v1/apis/drive/v3/rest'],
         });
-        state.gapiInited = true;
-        attemptSilentLogin();
+        switchToMainHub();
     } catch (error) {
         console.error("GAPI client initialization error:", error);
-        handleInitializationError("Failed to initialize Google Drive API. Please check your API Key and ensure the Drive API is enabled.");
-    }
-}
-
-function gisLoaded() {
-    try {
-        updateStatus("Initializing Authentication...");
-        state.tokenClient = google.accounts.oauth2.initTokenClient({
-            client_id: localStorage.getItem(config.DRIVE_CLIENT_ID_STORAGE),
-            scope: 'https://www.googleapis.com/auth/drive.readonly',
-            callback: (tokenResponse) => {
-                if (tokenResponse && tokenResponse.access_token) {
-                    switchToMainHub();
-                } else {
-                    updateStatus("Automatic login failed. Please connect manually.");
-                    showCredentialsScreen();
-                }
-            },
-        });
-        state.gsiInited = true;
-        attemptSilentLogin();
-    } catch (error) {
-        console.error("GSI client initialization error:", error);
-        handleInitializationError("Failed to initialize Google Authentication. Please check your Client ID.");
-    }
-}
-
-function handleInitializationError(message) {
-    updateStatus(message);
-    setTimeout(() => { showCredentialsScreen(); }, 3000); 
-}
-
-function attemptSilentLogin() {
-    if (state.gapiInited && state.gsiInited) {
-        updateStatus("Connecting to Google...");
-        state.tokenClient.requestAccessToken({ prompt: 'none' });
-    }
-}
-
-function handleManualAuthClick() {
-    if (state.tokenClient) {
-        state.tokenClient.requestAccessToken({ prompt: 'consent' });
-    } else {
-        alert("Authentication client not ready. Please refresh.");
+        alert("Failed to initialize Google Drive API. Please check your API Key.");
+        showCredentialsScreen();
     }
 }
 
@@ -379,7 +367,7 @@ function createCarousel(title, items, type) {
         const card = document.createElement('div');
         card.className = 'poster-card w-40 sm:w-48 mr-4 cursor-pointer';
         card.innerHTML = `<img src="${posterUrl}" class="rounded-lg w-full aspect-[2/3] object-cover bg-gray-800"><p class="mt-2 text-sm truncate">${item.name}</p>`;
-        const libraryItem = type === 'continue' ? findLibraryItem(item) || item : item;
+        const libraryItem = findLibraryItem(item) || item;
         card.addEventListener('click', () => {
             if (type === 'continue') openPlayer(libraryItem);
             else showDetails(libraryItem, { type });
