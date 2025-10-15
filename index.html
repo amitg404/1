@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Super Drive Hub v3</title>
+    <title>Super Drive Hub v4</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://apis.google.com/js/api.js"></script>
     <script src="https://accounts.google.com/gsi/client"></script>
@@ -79,14 +79,14 @@
     </div>
 
 <script>
-// --- CORE APP LOGIC (VERSION 3) ---
+// --- CORE APP LOGIC (VERSION 4) ---
 
 const config = {
-    DRIVE_API_KEY_STORAGE: 'superdrivehub_v3_google_api_key',
-    DRIVE_CLIENT_ID_STORAGE: 'superdrivehub_v3_google_client_id',
-    TMDB_API_KEY_STORAGE: 'superdrivehub_v3_tmdb_api_key',
-    LIBRARY_STORAGE: 'superdrivehub_v3_library_cache',
-    CONTINUE_WATCHING_STORAGE: 'superdrivehub_v3_continue_watching',
+    DRIVE_API_KEY_STORAGE: 'superdrivehub_v4_google_api_key',
+    DRIVE_CLIENT_ID_STORAGE: 'superdrivehub_v4_google_client_id',
+    TMDB_API_KEY_STORAGE: 'superdrivehub_v4_tmdb_api_key',
+    LIBRARY_STORAGE: 'superdrivehub_v4_library_cache',
+    CONTINUE_WATCHING_STORAGE: 'superdrivehub_v4_continue_watching',
     TMDB_BASE_URL: 'https://api.themoviedb.org/3',
     TMDB_IMG_URL: 'https://image.tmdb.org/t/p/w500',
     MAIN_FOLDER_NAME: 'Entertainment'
@@ -130,7 +130,7 @@ window.onload = () => {
     if (continueWatchingData) state.continueWatching = JSON.parse(continueWatchingData);
 
     if (document.getElementById('apiKey').value && document.getElementById('clientId').value) {
-        updateStatus("Initializing connection...");
+        updateStatus("Loading Google Libraries...");
         gapiLoaded();
         gisLoaded();
     } else {
@@ -167,34 +167,55 @@ logoutButton.addEventListener('click', () => {
 });
 
 
-// --- GOOGLE API & AUTHENTICATION (IMPROVED FLOW) ---
+// --- GOOGLE API & AUTHENTICATION (IMPROVED ERROR HANDLING) ---
 function gapiLoaded() { gapi.load('client', initializeGapiClient); }
 
 async function initializeGapiClient() {
-    await gapi.client.init({
-        apiKey: localStorage.getItem(config.DRIVE_API_KEY_STORAGE),
-        discoveryDocs: ['https://www.googleapis.com/discovery/v1/apis/drive/v3/rest'],
-    });
-    state.gapiInited = true;
-    attemptSilentLogin();
+    try {
+        updateStatus("Initializing Drive API...");
+        await gapi.client.init({
+            apiKey: localStorage.getItem(config.DRIVE_API_KEY_STORAGE),
+            discoveryDocs: ['https://www.googleapis.com/discovery/v1/apis/drive/v3/rest'],
+        });
+        state.gapiInited = true;
+        attemptSilentLogin();
+    } catch (error) {
+        console.error("GAPI client initialization error:", error);
+        handleInitializationError("Failed to initialize Google Drive API. Please check your API Key and ensure the Drive API is enabled in your Google Cloud project.");
+    }
 }
 
 function gisLoaded() {
-    state.tokenClient = google.accounts.oauth2.initTokenClient({
-        client_id: localStorage.getItem(config.DRIVE_CLIENT_ID_STORAGE),
-        scope: 'https://www.googleapis.com/auth/drive.readonly',
-        callback: (tokenResponse) => {
-            if (tokenResponse && tokenResponse.access_token) {
-                switchToMainHub();
-            } else {
-                updateStatus("Please log in to continue.");
-                showCredentialsScreen();
-            }
-        },
-    });
-    state.gsiInited = true;
-    attemptSilentLogin();
+    try {
+        updateStatus("Initializing Authentication...");
+        state.tokenClient = google.accounts.oauth2.initTokenClient({
+            client_id: localStorage.getItem(config.DRIVE_CLIENT_ID_STORAGE),
+            scope: 'https://www.googleapis.com/auth/drive.readonly',
+            callback: (tokenResponse) => {
+                if (tokenResponse && tokenResponse.access_token) {
+                    switchToMainHub();
+                } else {
+                    updateStatus("Automatic login failed. Please connect manually.");
+                    showCredentialsScreen();
+                }
+            },
+        });
+        state.gsiInited = true;
+        attemptSilentLogin();
+    } catch (error) {
+        console.error("GSI client initialization error:", error);
+        handleInitializationError("Failed to initialize Google Authentication. Please check your Client ID configuration.");
+    }
 }
+
+function handleInitializationError(message) {
+    updateStatus(message);
+    setTimeout(() => {
+        loadingIndicator.style.display = 'none';
+        credentialsBox.style.display = 'block';
+    }, 3000); 
+}
+
 
 function attemptSilentLogin() {
     if (state.gapiInited && state.gsiInited) {
@@ -236,6 +257,7 @@ async function startLibraryScan() {
         const mainFolderId = await findFolderId(config.MAIN_FOLDER_NAME);
         if (!mainFolderId) {
             updateStatus(`Error: Main folder '${config.MAIN_FOLDER_NAME}' not found.`);
+            setTimeout(() => { switchToMainHub(); scanButtonContainer.style.display = 'block'; }, 3000);
             return;
         }
 
@@ -262,7 +284,8 @@ async function startLibraryScan() {
 
     } catch (error) {
         console.error("Library Scan Failed:", error);
-        updateStatus("An error occurred. Please check console and API keys.");
+        updateStatus("An error occurred during the scan. Please check console.");
+        setTimeout(() => { switchToMainHub(); scanButtonContainer.style.display = 'block'; }, 3000);
     }
 }
 
@@ -359,7 +382,9 @@ async function getTMDbData(title, type) {
     return { poster: null, backdrop: null, overview: 'No description available.', release_date: '', tmdbId: null };
 }
 
-// --- UI RENDERING ---
+// --- UI RENDERING & PLAYER LOGIC ---
+function updateStatus(message) { loadingStatus.innerText = message; }
+
 function renderMainHub() {
     hubContent.innerHTML = '';
     if (state.continueWatching.length > 0) hubContent.appendChild(createCarousel('Continue Watching', state.continueWatching, 'continue'));
@@ -429,7 +454,6 @@ function closeDetails() {
     state.activeDetailItem = null;
 }
 
-// --- PLAYER LOGIC ---
 function openPlayer(itemContext) {
     state.currentPlaying = itemContext;
     updateContinueWatching(itemContext);
@@ -456,9 +480,9 @@ closePlayer.addEventListener('click', () => {
 nextEpisodeBtn.addEventListener('click', playNextEpisode);
 
 function hasNextEpisode(context) {
-    if (!context || context.type === 'movie') return false;
+    if (!context || !context.type || context.type === 'movie') return false;
     const series = findLibraryItem(context);
-    if (!series) return false;
+    if (!series || !series.seasons || !series.seasons[context.seasonIndex]) return false;
     const season = series.seasons[context.seasonIndex];
     return context.episodeIndex < season.episodes.length - 1;
 }
@@ -474,7 +498,6 @@ function playNextEpisode() {
     openPlayer(nextContext);
 }
 
-// --- METADATA & LIBRARY HELPERS ---
 async function handleMetadataCorrection() {
     const { item, context } = state.activeDetailItem;
     const tmdbUrl = prompt(`Enter the correct TMDb URL for "${item.name}":\n(e.g., https://www.themoviedb.org/tv/1668-friends)`);
@@ -513,10 +536,11 @@ async function handleMetadataCorrection() {
 }
 
 function findLibraryItem(itemToFind) {
+    if (!itemToFind || !itemToFind.type) return null;
     const typeKeyMap = { 'movie': 'movies', 'tvSeries': 'tvSeries', 'filmSeries': 'filmSeries' };
     const typeKey = typeKeyMap[itemToFind.type];
     if (!typeKey) return null;
-    return state.library[typeKey].find(i => i.name === itemToFind.name);
+    return state.library[typeKey]?.find(i => i.name === itemToFind.name);
 }
 
 function updateContinueWatching(item) {
@@ -533,3 +557,6 @@ function updateContinueWatching(item) {
 </script>
 </body>
 </html>
+
+
+improve this code without changing the core logic and give me the whole updated code
