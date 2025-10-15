@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Super Drive Hub v4</title>
+    <title>Super Drive Hub v5</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://apis.google.com/js/api.js"></script>
     <script src="https://accounts.google.com/gsi/client"></script>
@@ -17,7 +17,6 @@
         .poster-card:hover { transform: scale(1.05); }
         .carousel { display: flex; overflow-x: auto; scroll-snap-type: x mandatory; padding-bottom: 20px; }
         .carousel > div { scroll-snap-align: start; flex-shrink: 0; }
-        #videoPlayer iframe { width: 100%; height: 100%; }
         .modal-bg { backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px); }
     </style>
 </head>
@@ -66,27 +65,18 @@
             <div class="fixed inset-0 bg-black bg-opacity-75 modal-bg"></div>
             <div id="detailsContent" class="relative min-h-screen"></div>
         </div>
-
-        <div id="videoPlayer" class="hidden fixed inset-0 bg-black z-50 flex flex-col items-center justify-center">
-            <button id="closePlayer" class="absolute top-4 right-4 text-white text-4xl font-bold z-50">&times;</button>
-            <div class="w-full h-full flex items-center justify-center p-4">
-                <div id="playerContainer" class="relative w-full max-w-6xl aspect-video bg-black rounded-lg overflow-hidden shadow-2xl text-center flex items-center justify-center"></div>
-            </div>
-            <div id="playerControls" class="absolute bottom-5 right-5 z-50">
-                 <button id="nextEpisodeBtn" class="hidden bg-gray-800/80 hover:bg-gray-700/90 py-2 px-4 rounded-lg">Next Episode &gt;</button>
-            </div>
-        </div>
     </div>
 
 <script>
-// --- CORE APP LOGIC (VERSION 4) ---
+// --- CORE APP LOGIC (VERSION 5) ---
 
 const config = {
-    DRIVE_API_KEY_STORAGE: 'superdrivehub_v4_google_api_key',
-    DRIVE_CLIENT_ID_STORAGE: 'superdrivehub_v4_google_client_id',
-    TMDB_API_KEY_STORAGE: 'superdrivehub_v4_tmdb_api_key',
-    LIBRARY_STORAGE: 'superdrivehub_v4_library_cache',
-    CONTINUE_WATCHING_STORAGE: 'superdrivehub_v4_continue_watching',
+    // Using v5 to avoid conflicts with old cached data
+    DRIVE_API_KEY_STORAGE: 'superdrivehub_v5_google_api_key',
+    DRIVE_CLIENT_ID_STORAGE: 'superdrivehub_v5_google_client_id',
+    TMDB_API_KEY_STORAGE: 'superdrivehub_v5_tmdb_api_key',
+    LIBRARY_STORAGE: 'superdrivehub_v5_library_cache',
+    CONTINUE_WATCHING_STORAGE: 'superdrivehub_v5_continue_watching',
     TMDB_BASE_URL: 'https://api.themoviedb.org/3',
     TMDB_IMG_URL: 'https://image.tmdb.org/t/p/w500',
     MAIN_FOLDER_NAME: 'Entertainment'
@@ -96,7 +86,6 @@ let state = {
     gapiInited: false, gsiInited: false, tokenClient: null,
     library: { movies: [], filmSeries: [], tvSeries: [] },
     continueWatching: [],
-    currentPlaying: null,
     activeDetailItem: null,
 };
 
@@ -110,10 +99,6 @@ const hubContent = document.getElementById('hubContent');
 const scanButtonContainer = document.getElementById('scanButtonContainer');
 const detailsModal = document.getElementById('detailsModal');
 const detailsContent = document.getElementById('detailsContent');
-const videoPlayer = document.getElementById('videoPlayer');
-const playerContainer = document.getElementById('playerContainer');
-const nextEpisodeBtn = document.getElementById('nextEpisodeBtn');
-const closePlayer = document.getElementById('closePlayer');
 const authButton = document.getElementById('authButton');
 const logoutButton = document.getElementById('logoutButton');
 const scanButton = document.getElementById('scanButton');
@@ -152,22 +137,22 @@ authButton.addEventListener('click', () => {
         localStorage.setItem(config.DRIVE_API_KEY_STORAGE, apiKey);
         localStorage.setItem(config.DRIVE_CLIENT_ID_STORAGE, clientId);
         localStorage.setItem(config.TMDB_API_KEY_STORAGE, tmdbApiKey);
-
-        if (!state.gapiInited || !state.gsiInited) {
-            window.location.reload();
-        } else {
-            handleManualAuthClick();
-        }
+        window.location.reload();
     } else { alert('Please enter all three API keys.'); }
 });
 
 logoutButton.addEventListener('click', () => {
     Object.values(config).forEach(key => localStorage.removeItem(key));
+    // Also clear the new track preferences
+    Object.keys(localStorage).forEach(key => {
+        if (key.startsWith('track_prefs_')) {
+            localStorage.removeItem(key);
+        }
+    });
     window.location.reload();
 });
 
-
-// --- GOOGLE API & AUTHENTICATION (IMPROVED ERROR HANDLING) ---
+// --- GOOGLE API & AUTHENTICATION ---
 function gapiLoaded() { gapi.load('client', initializeGapiClient); }
 
 async function initializeGapiClient() {
@@ -181,7 +166,7 @@ async function initializeGapiClient() {
         attemptSilentLogin();
     } catch (error) {
         console.error("GAPI client initialization error:", error);
-        handleInitializationError("Failed to initialize Google Drive API. Please check your API Key and ensure the Drive API is enabled in your Google Cloud project.");
+        handleInitializationError("Failed to initialize Google Drive API. Please check your API Key and ensure the Drive API is enabled.");
     }
 }
 
@@ -204,18 +189,14 @@ function gisLoaded() {
         attemptSilentLogin();
     } catch (error) {
         console.error("GSI client initialization error:", error);
-        handleInitializationError("Failed to initialize Google Authentication. Please check your Client ID configuration.");
+        handleInitializationError("Failed to initialize Google Authentication. Please check your Client ID.");
     }
 }
 
 function handleInitializationError(message) {
     updateStatus(message);
-    setTimeout(() => {
-        loadingIndicator.style.display = 'none';
-        credentialsBox.style.display = 'block';
-    }, 3000); 
+    setTimeout(() => { showCredentialsScreen(); }, 3000); 
 }
-
 
 function attemptSilentLogin() {
     if (state.gapiInited && state.gsiInited) {
@@ -228,14 +209,13 @@ function handleManualAuthClick() {
     if (state.tokenClient) {
         state.tokenClient.requestAccessToken({ prompt: 'consent' });
     } else {
-        alert("Authentication client not ready. Please wait or refresh.");
+        alert("Authentication client not ready. Please refresh.");
     }
 }
 
 function switchToMainHub() {
     loadingScreen.style.display = 'none';
     mainHub.style.display = 'block';
-    
     if (state.library.movies.length === 0 && state.library.tvSeries.length === 0 && state.library.filmSeries.length === 0) {
         scanButtonContainer.style.display = 'block';
     } else {
@@ -251,7 +231,6 @@ async function startLibraryScan() {
     scanButtonContainer.style.display = 'none';
     loadingScreen.style.display = 'flex';
     loadingIndicator.style.display = 'block';
-    
     try {
         updateStatus(`Finding '${config.MAIN_FOLDER_NAME}' folder...`);
         const mainFolderId = await findFolderId(config.MAIN_FOLDER_NAME);
@@ -260,11 +239,9 @@ async function startLibraryScan() {
             setTimeout(() => { switchToMainHub(); scanButtonContainer.style.display = 'block'; }, 3000);
             return;
         }
-
         updateStatus("Scanning library structure...");
         const folders = await listItemsInFolder(mainFolderId, "mimeType='application/vnd.google-apps.folder'");
         const tempLibrary = { movies: [], filmSeries: [], tvSeries: [] };
-
         for (const folder of folders) {
             if (folder.name.toLowerCase() === 'movies') {
                 updateStatus("Processing Movies...");
@@ -277,11 +254,9 @@ async function startLibraryScan() {
                 tempLibrary.tvSeries = await processSeriesFolder(folder.id, 'tvSeries');
             }
         }
-
         state.library = tempLibrary;
         localStorage.setItem(config.LIBRARY_STORAGE, JSON.stringify(state.library));
         switchToMainHub();
-
     } catch (error) {
         console.error("Library Scan Failed:", error);
         updateStatus("An error occurred during the scan. Please check console.");
@@ -303,7 +278,6 @@ async function listItemsInFolder(folderId, query = "") {
     let pageToken = null;
     const baseQuery = `'${folderId}' in parents and trashed=false`;
     const finalQuery = query ? `${baseQuery} and (${query})` : baseQuery;
-    
     do {
         const response = await gapi.client.drive.files.list({
             q: finalQuery,
@@ -337,7 +311,6 @@ async function processSeriesFolder(folderId, type) {
         updateStatus(`Processing: ${seriesFolder.name}`);
         const tmdbData = await getTMDbData(seriesFolder.name, type === 'tvSeries' ? 'tv' : 'movie');
         const seriesData = { name: seriesFolder.name, type: type, ...tmdbData, seasons: [] };
-
         if (type === 'tvSeries') {
             const seasonFolders = await listItemsInFolder(seriesFolder.id, "mimeType='application/vnd.google-apps.folder'");
             seasonFolders.sort((a, b) => a.name.localeCompare(b.name, undefined, { numeric: true }));
@@ -348,7 +321,7 @@ async function processSeriesFolder(folderId, type) {
             }
         } else { // Film Series
             const movieFolders = await listItemsInFolder(seriesFolder.id, "mimeType='application/vnd.google-apps.folder'");
-             movieFolders.sort((a, b) => a.name.localeCompare(b.name, undefined, { numeric: true }));
+            movieFolders.sort((a, b) => a.name.localeCompare(b.name, undefined, { numeric: true }));
             const movies = [];
             for (const movieFolder of movieFolders) {
                 const videoFiles = await listItemsInFolder(movieFolder.id, "mimeType contains 'video/'");
@@ -383,8 +356,6 @@ async function getTMDbData(title, type) {
 }
 
 // --- UI RENDERING & PLAYER LOGIC ---
-function updateStatus(message) { loadingStatus.innerText = message; }
-
 function renderMainHub() {
     hubContent.innerHTML = '';
     if (state.continueWatching.length > 0) hubContent.appendChild(createCarousel('Continue Watching', state.continueWatching, 'continue'));
@@ -432,7 +403,7 @@ function showDetails(item, context) {
 
     if (item.type === 'movie') {
         contentHtml += `<button onclick='openPlayer(${JSON.stringify(item)})' class="mt-6 bg-red-600 hover:bg-red-700 px-8 py-3 rounded-lg font-semibold">Play Movie</button>`;
-    } else { // Series
+    } else {
         item.seasons.forEach((season, seasonIndex) => {
             contentHtml += `<h3 class="text-2xl font-bold mt-8 mb-4">${season.name}</h3><div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">`;
             season.episodes.forEach((episode, episodeIndex) => {
@@ -455,64 +426,41 @@ function closeDetails() {
 }
 
 function openPlayer(itemContext) {
-    state.currentPlaying = itemContext;
     updateContinueWatching(itemContext);
     
-    const embedUrl = `https://drive.google.com/file/d/${itemContext.driveId}/preview`;
-    playerContainer.innerHTML = `<iframe src="${embedUrl}" frameborder="0" allow="autoplay; fullscreen" allowfullscreen></iframe>`;
-    playerContainer.innerHTML += `<p class="text-xs text-gray-500 mt-2 absolute bottom-2 left-0 right-0">If video doesn't load, it may not be embeddable. Try allowing third-party cookies for Google in your browser settings.</p>`;
-
-    videoPlayer.style.display = 'flex';
+    const params = new URLSearchParams();
+    params.set('driveId', itemContext.driveId);
+    params.set('title', itemContext.name);
     
-    if (hasNextEpisode(itemContext)) {
-        nextEpisodeBtn.style.display = 'block';
-    } else {
-        nextEpisodeBtn.style.display = 'none';
+    if (itemContext.type !== 'movie') {
+        params.set('seriesId', itemContext.tmdbId);
+        
+        const series = findLibraryItem(itemContext);
+        if (series && series.seasons) {
+            const season = series.seasons[itemContext.seasonIndex];
+            if (itemContext.episodeIndex < season.episodes.length - 1) {
+                const nextEpisode = season.episodes[itemContext.episodeIndex + 1];
+                params.set('nextDriveId', nextEpisode.driveId);
+                params.set('nextTitle', nextEpisode.name);
+            }
+        }
     }
-}
-
-closePlayer.addEventListener('click', () => {
-    playerContainer.innerHTML = '';
-    videoPlayer.style.display = 'none';
-    state.currentPlaying = null;
-});
-
-nextEpisodeBtn.addEventListener('click', playNextEpisode);
-
-function hasNextEpisode(context) {
-    if (!context || !context.type || context.type === 'movie') return false;
-    const series = findLibraryItem(context);
-    if (!series || !series.seasons || !series.seasons[context.seasonIndex]) return false;
-    const season = series.seasons[context.seasonIndex];
-    return context.episodeIndex < season.episodes.length - 1;
-}
-
-function playNextEpisode() {
-    if (!hasNextEpisode(state.currentPlaying)) return;
     
-    const series = findLibraryItem(state.currentPlaying);
-    const nextEpisodeIndex = state.currentPlaying.episodeIndex + 1;
-    const nextEpisode = series.seasons[state.currentPlaying.seasonIndex].episodes[nextEpisodeIndex];
-
-    const nextContext = { ...state.currentPlaying, driveId: nextEpisode.driveId, name: nextEpisode.name, episodeIndex: nextEpisodeIndex };
-    openPlayer(nextContext);
+    window.open(`player.html?${params.toString()}`, '_blank');
 }
 
 async function handleMetadataCorrection() {
     const { item, context } = state.activeDetailItem;
     const tmdbUrl = prompt(`Enter the correct TMDb URL for "${item.name}":\n(e.g., https://www.themoviedb.org/tv/1668-friends)`);
     if (!tmdbUrl) return;
-
     const match = tmdbUrl.match(/(movie|tv)\/(\d+)/);
     if (!match) {
         alert("Invalid URL format. Please use a valid TMDb movie or TV show URL.");
         return;
     }
     const [_, type, id] = match;
-
     const tmdbApiKey = localStorage.getItem(config.TMDB_API_KEY_STORAGE);
     const url = `${config.TMDB_BASE_URL}/${type}/${id}?api_key=${tmdbApiKey}`;
-    
     try {
         const response = await fetch(url);
         const data = await response.json();
@@ -523,12 +471,10 @@ async function handleMetadataCorrection() {
             release_date: data.release_date || data.first_air_date,
             tmdbId: data.id
         };
-        
         Object.assign(item, newDetails);
         localStorage.setItem(config.LIBRARY_STORAGE, JSON.stringify(state.library));
         showDetails(item, context);
         renderMainHub();
-
     } catch (error) {
         alert("Failed to fetch data from TMDb. Please check the URL and your API key.");
         console.error("TMDb fetch error:", error);
@@ -557,6 +503,3 @@ function updateContinueWatching(item) {
 </script>
 </body>
 </html>
-
-
-improve this code without changing the core logic and give me the whole updated code
