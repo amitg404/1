@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Super Drive Hub v5</title>
+    <title>Super Drive Hub v5.1</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://apis.google.com/js/api.js"></script>
     <script src="https://accounts.google.com/gsi/client"></script>
@@ -68,7 +68,7 @@
     </div>
 
 <script>
-// --- CORE APP LOGIC (VERSION 5) ---
+// --- CORE APP LOGIC (VERSION 5.1 - Bug Fix) ---
 
 const config = {
     DRIVE_API_KEY_STORAGE: 'superdrivehub_v5_google_api_key',
@@ -101,6 +101,12 @@ const detailsContent = document.getElementById('detailsContent');
 const authButton = document.getElementById('authButton');
 const logoutButton = document.getElementById('logoutButton');
 const scanButton = document.getElementById('scanButton');
+
+// --- UI HELPER FUNCTIONS ---
+// MOVED THIS FUNCTION UP TO FIX THE INITIALIZATION BUG
+function updateStatus(message) {
+    loadingStatus.innerText = message;
+}
 
 // --- INITIALIZATION ---
 window.onload = () => {
