@@ -1,0 +1,583 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Super Drive Hub</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://apis.google.com/js/api.js"></script>
+    <script src="https://accounts.google.com/gsi/client"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <style>
+        body { font-family: 'Inter', sans-serif; }
+        ::-webkit-scrollbar { width: 8px; }
+        ::-webkit-scrollbar-track { background: #111827; }
+        ::-webkit-scrollbar-thumb { background: #374151; border-radius: 10px; }
+        .poster-card { transition: transform 0.2s ease-in-out; }
+        .poster-card:hover { transform: scale(1.05); }
+        .carousel { display: flex; overflow-x: auto; scroll-snap-type: x mandatory; padding-bottom: 20px; }
+        .carousel > div { scroll-snap-align: start; flex-shrink: 0; }
+        #videoPlayer iframe { width: 100%; height: 100%; }
+        .modal-bg { backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px); }
+    </style>
+</head>
+<body class="bg-gray-900 text-white antialiased">
+
+    <div id="app">
+        <div id="credentialsScreen" class="min-h-screen flex items-center justify-center p-4">
+            <div class="w-full max-w-md bg-gray-800 rounded-2xl shadow-lg p-8">
+                <h1 class="text-3xl font-bold text-center mb-2 text-red-500">Super Drive Hub</h1>
+                <p class="text-center text-gray-400 mb-8">Enter your API credentials to begin.</p>
+                <div class="space-y-4">
+                    <div>
+                        <label for="apiKey" class="block text-sm font-medium text-gray-300 mb-1">Google API Key</label>
+                        <input type="password" id="apiKey" class="w-full bg-gray-700 border border-gray-600 rounded-lg p-3 text-white focus:ring-2 focus:ring-red-500 focus:outline-none" placeholder="Enter your Google API Key">
+                    </div>
+                    <div>
+                        <label for="clientId" class="block text-sm font-medium text-gray-300 mb-1">Google Client ID</label>
+                        <input type="password" id="clientId" class="w-full bg-gray-700 border border-gray-600 rounded-lg p-3 text-white focus:ring-2 focus:ring-red-500 focus:outline-none" placeholder="Enter your Client ID">
+                    </div>
+                    <div>
+                        <label for="tmdbApiKey" class="block text-sm font-medium text-gray-300 mb-1">TMDb API Key</eabel>
+                        <input type="password" id="tmdbApiKey" class="w-full bg-gray-700 border border-gray-600 rounded-lg p-3 text-white focus:ring-2 focus:ring-red-500 focus:outline-none" placeholder="Enter your TMDb API Key (v3 Auth)">
+                    </div>
+                </div>
+                <button id="authButton" class="w-full bg-red-600 hover:bg-red-700 text-white font-bold py-3 rounded-lg mt-8 transition-colors duration-200">Connect & Scan Library</button>
+            </div>
+        </div>
+
+        <div id="mainHub" class="hidden p-4 sm:p-6 md:p-8">
+            <div class="flex justify-between items-center mb-6">
+                 <h1 class="text-3xl font-bold text-red-500">Browse</h1>
+                 <button id="logoutButton" class="text-gray-400 hover:text-white transition-colors duration-200">Logout</button>
+            </div>
+            <div id="hubContent"></div>
+             <div id="loading" class="text-center py-20">
+                <div class="animate-spin rounded-full h-12 w-12 border-b-2 border-red-500 mx-auto"></div>
+                <p id="loadingStatus" class="mt-4 text-lg">Initializing...</p>
+            </div>
+        </div>
+
+        <div id="detailsModal" class="hidden fixed inset-0 z-40 overflow-y-auto">
+            <div class="fixed inset-0 bg-black bg-opacity-75 modal-bg"></div>
+            <div id="detailsContent" class="relative min-h-screen">
+                </div>
+        </div>
+
+        <div id="videoPlayer" class="hidden fixed inset-0 bg-black z-50 flex flex-col items-center justify-center">
+            <button id="closePlayer" class="absolute top-4 right-4 text-white text-4xl font-bold z-50">&times;</button>
+            <div class="w-full h-full flex items-center justify-center p-4">
+                <div id="playerContainer" class="relative w-full max-w-6xl aspect-video bg-black rounded-lg overflow-hidden shadow-2xl"></div>
+            </div>
+            <div id="nextEpisodeContainer" class="hidden absolute bottom-1/2 translate-y-1/2 right-8 bg-gray-800/80 p-4 rounded-lg text-center z-50">
+                <p>Next episode starting in...</p>
+                <p id="nextEpisodeCountdown" class="text-4xl font-bold">5</p>
+                <button id="playNextNow" class="mt-2 text-sm text-red-400">Play Now</button>
+            </div>
+        </div>
+    </div>
+
+<script>
+// --- CORE APP LOGIC ---
+
+// --- CONFIG & STATE ---
+const config = {
+    DRIVE_API_KEY_STORAGE: 'superdrivehub_google_api_key',
+    DRIVE_CLIENT_ID_STORAGE: 'superdrivehub_google_client_id',
+    TMDB_API_KEY_STORAGE: 'superdrivehub_tmdb_api_key',
+    LIBRARY_STORAGE: 'superdrivehub_library_cache',
+    CONTINUE_WATCHING_STORAGE: 'superdrivehub_continue_watching',
+    TMDB_BASE_URL: 'https://api.themoviedb.org/3',
+    TMDB_IMG_URL: 'https://image.tmdb.org/t/p/w500',
+    MAIN_FOLDER_NAME: 'Entertainment'
+};
+
+let state = {
+    gapiInited: false,
+    gsiInited: false,
+    tokenClient: null,
+    library: { movies: [], filmSeries: [], tvSeries: [] },
+    continueWatching: [],
+    currentPlaying: null, // {type, seriesId, seasonIndex, episodeIndex}
+    nextEpisodeTimer: null
+};
+
+// --- DOM ELEMENTS ---
+const credentialsScreen = document.getElementById('credentialsScreen');
+const mainHub = document.getElementById('mainHub');
+const hubContent = document.getElementById('hubContent');
+const loading = document.getElementById('loading');
+const loadingStatus = document.getElementById('loadingStatus');
+const detailsModal = document.getElementById('detailsModal');
+const detailsContent = document.getElementById('detailsContent');
+const videoPlayer = document.getElementById('videoPlayer');
+const playerContainer = document.getElementById('playerContainer');
+const nextEpisodeContainer = document.getElementById('nextEpisodeContainer');
+const nextEpisodeCountdown = document.getElementById('nextEpisodeCountdown');
+const playNextNow = document.getElementById('playNextNow');
+const closePlayer = document.getElementById('closePlayer');
+const authButton = document.getElementById('authButton');
+const logoutButton = document.getElementById('logoutButton');
+
+// --- INITIALIZATION ---
+window.onload = () => {
+    // Load credentials from localStorage
+    document.getElementById('apiKey').value = localStorage.getItem(config.DRIVE_API_KEY_STORAGE) || '';
+    document.getElementById('clientId').value = localStorage.getItem(config.DRIVE_CLIENT_ID_STORAGE) || '';
+    document.getElementById('tmdbApiKey').value = localStorage.getItem(config.TMDB_API_KEY_STORAGE) || '';
+    
+    // Load cached library and continue watching list
+    const cachedLibrary = localStorage.getItem(config.LIBRARY_STORAGE);
+    if (cachedLibrary) state.library = JSON.parse(cachedLibrary);
+    const continueWatchingData = localStorage.getItem(config.CONTINUE_WATCHING_STORAGE);
+    if (continueWatchingData) state.continueWatching = JSON.parse(continueWatchingData);
+
+    if (document.getElementById('apiKey').value && document.getElementById('clientId').value) {
+        gapiLoaded();
+        gisLoaded();
+    }
+};
+
+authButton.addEventListener('click', () => {
+    const apiKey = document.getElementById('apiKey').value.trim();
+    const clientId = document.getElementById('clientId').value.trim();
+    const tmdbApiKey = document.getElementById('tmdbApiKey').value.trim();
+
+    if (apiKey && clientId && tmdbApiKey) {
+        localStorage.setItem(config.DRIVE_API_KEY_STORAGE, apiKey);
+        localStorage.setItem(config.DRIVE_CLIENT_ID_STORAGE, clientId);
+        localStorage.setItem(config.TMDB_API_KEY_STORAGE, tmdbApiKey);
+        gapiLoaded(); // Ensure they are loaded
+        gisLoaded();
+        handleAuthClick();
+    } else {
+        alert('Please enter all three API keys.');
+    }
+});
+
+logoutButton.addEventListener('click', () => {
+    Object.values(config).forEach(key => localStorage.removeItem(key));
+    window.location.reload();
+});
+
+// --- GOOGLE API & AUTHENTICATION ---
+function gapiLoaded() { gapi.load('client', initializeGapiClient); }
+function gisLoaded() {
+    const clientId = localStorage.getItem(config.DRIVE_CLIENT_ID_STORAGE);
+    if (!clientId) return;
+    state.tokenClient = google.accounts.oauth2.initTokenClient({
+        client_id: clientId,
+        scope: 'https://www.googleapis.com/auth/drive.readonly',
+        callback: (resp) => {
+            if (resp.error) throw(resp);
+            credentialsScreen.style.display = 'none';
+            mainHub.style.display = 'block';
+            startLibraryScan();
+        }
+    });
+    state.gsiInited = true;
+}
+
+async function initializeGapiClient() {
+    const apiKey = localStorage.getItem(config.DRIVE_API_KEY_STORAGE);
+    if (!apiKey) return;
+    await gapi.client.init({
+        apiKey: apiKey,
+        discoveryDocs: ['https://www.googleapis.com/discovery/v1/apis/drive/v3/rest'],
+    });
+    state.gapiInited = true;
+}
+
+function handleAuthClick() {
+    if (gapi.client.getToken() === null) {
+        state.tokenClient.requestAccessToken({ prompt: 'consent' });
+    } else {
+        state.tokenClient.requestAccessToken({ prompt: '' });
+    }
+}
+
+
+// --- LIBRARY SCANNING LOGIC ---
+async function startLibraryScan() {
+    // If we have a cached library, show it immediately while we scan in the background for updates.
+    if (state.library.movies.length > 0 || state.library.tvSeries.length > 0 || state.library.filmSeries.length > 0) {
+        loading.style.display = 'none';
+        renderMainHub();
+    } else {
+        loading.style.display = 'block';
+    }
+    
+    try {
+        updateStatus("Finding 'Entertainment' folder...");
+        const mainFolderId = await findFolderId(config.MAIN_FOLDER_NAME);
+        if (!mainFolderId) {
+            updateStatus(`Error: Main folder '${config.MAIN_FOLDER_NAME}' not found.`);
+            return;
+        }
+
+        updateStatus("Scanning library structure...");
+        const folders = await listItemsInFolder(mainFolderId, "mimeType='application/vnd.google-apps.folder'");
+        const tempLibrary = { movies: [], filmSeries: [], tvSeries: [] };
+
+        for (const folder of folders) {
+            if (folder.name.toLowerCase() === 'movies') {
+                updateStatus("Processing Movies...");
+                tempLibrary.movies = await processMovieFolder(folder.id, 'movie');
+            } else if (folder.name.toLowerCase() === 'film series') {
+                updateStatus("Processing Film Series...");
+                tempLibrary.filmSeries = await processSeriesFolder(folder.id, 'filmSeries');
+            } else if (folder.name.toLowerCase() === 'series') {
+                updateStatus("Processing TV Series...");
+                tempLibrary.tvSeries = await processSeriesFolder(folder.id, 'tvSeries');
+            }
+        }
+
+        state.library = tempLibrary;
+        localStorage.setItem(config.LIBRARY_STORAGE, JSON.stringify(state.library));
+        loading.style.display = 'none';
+        renderMainHub();
+
+    } catch (error) {
+        console.error("Library Scan Failed:", error);
+        updateStatus("An error occurred. Please check console and API keys.");
+    }
+}
+
+// --- DRIVE API HELPERS ---
+async function findFolderId(name) {
+    const response = await gapi.client.drive.files.list({
+        q: `mimeType='application/vnd.google-apps.folder' and name='${name}' and trashed=false`,
+        fields: 'files(id)',
+        pageSize: 1
+    });
+    return response.result.files?.[0]?.id;
+}
+
+async function listItemsInFolder(folderId, query = "") {
+    let items = [];
+    let pageToken = null;
+    const baseQuery = `'${folderId}' in parents and trashed=false`;
+    const finalQuery = query ? `${baseQuery} and (${query})` : baseQuery;
+    
+    do {
+        const response = await gapi.client.drive.files.list({
+            q: finalQuery,
+            fields: 'nextPageToken, files(id, name)',
+            pageSize: 200,
+            pageToken: pageToken
+        });
+        items.push(...response.result.files);
+        pageToken = response.result.nextPageToken;
+    } while (pageToken);
+    return items;
+}
+
+// --- CONTENT PROCESSING ---
+async function processMovieFolder(folderId, type) {
+    const movieFolders = await listItemsInFolder(folderId, "mimeType='application/vnd.google-apps.folder'");
+    const movies = [];
+    for (const movieFolder of movieFolders) {
+        const videoFiles = await listItemsInFolder(movieFolder.id, "mimeType contains 'video/'");
+        if (videoFiles.length > 0) {
+            const tmdbData = await getTMDbData(movieFolder.name, 'movie');
+            movies.push({ driveId: videoFiles[0].id, name: movieFolder.name, ...tmdbData });
+        }
+    }
+    return movies;
+}
+
+async function processSeriesFolder(folderId, type) {
+    const seriesFolders = await listItemsInFolder(folderId, "mimeType='application/vnd.google-apps.folder'");
+    const allSeries = [];
+    for (const seriesFolder of seriesFolders) {
+        updateStatus(`Processing: ${seriesFolder.name}`);
+        const tmdbData = await getTMDbData(seriesFolder.name, type === 'tvSeries' ? 'tv' : 'movie'); // Film series are collections of movies
+        const seriesData = { name: seriesFolder.name, ...tmdbData, seasons: [] };
+
+        if (type === 'tvSeries') {
+            const seasonFolders = await listItemsInFolder(seriesFolder.id, "mimeType='application/vnd.google-apps.folder'");
+            seasonFolders.sort((a, b) => a.name.localeCompare(b.name, undefined, { numeric: true }));
+            for (const seasonFolder of seasonFolders) {
+                const episodes = await listItemsInFolder(seasonFolder.id, "mimeType contains 'video/'");
+                episodes.sort((a, b) => a.name.localeCompare(b.name, undefined, { numeric: true }));
+                seriesData.seasons.push({ name: seasonFolder.name, episodes: episodes.map(e => ({ name: e.name, driveId: e.id })) });
+            }
+        } else { // Film Series
+            const movieFolders = await listItemsInFolder(seriesFolder.id, "mimeType='application/vnd.google-apps.folder'");
+             movieFolders.sort((a, b) => a.name.localeCompare(b.name, undefined, { numeric: true }));
+            const movies = [];
+            for (const movieFolder of movieFolders) {
+                const videoFiles = await listItemsInFolder(movieFolder.id, "mimeType contains 'video/'");
+                if (videoFiles.length > 0) movies.push({ name: movieFolder.name, driveId: videoFiles[0].id });
+            }
+            seriesData.seasons.push({ name: 'Movies', episodes: movies });
+        }
+        allSeries.push(seriesData);
+    }
+    return allSeries;
+}
+
+// --- TMDB API HELPER ---
+async function getTMDbData(title, type) {
+    const tmdbApiKey = localStorage.getItem(config.TMDB_API_KEY_STORAGE);
+    const cleanedTitle = title.replace(/\(.*\)|\[.*\]/g, '').trim(); // Clean title like "Movie (2022)"
+    const url = `${config.TMDB_BASE_URL}/search/${type}?api_key=${tmdbApiKey}&query=${encodeURIComponent(cleanedTitle)}`;
+    try {
+        const response = await fetch(url);
+        const data = await response.json();
+        const result = data.results?.[0];
+        if (result) {
+            return {
+                poster: result.poster_path ? `${config.TMDB_IMG_URL}${result.poster_path}` : null,
+                backdrop: result.backdrop_path ? `${config.TMDB_IMG_URL.replace('w500', 'w1280')}${result.backdrop_path}` : null,
+                overview: result.overview,
+                release_date: result.release_date || result.first_air_date,
+                tmdbId: result.id
+            };
+        }
+    } catch (error) { console.error(`TMDb fetch failed for ${title}:`, error); }
+    return { poster: null, backdrop: null, overview: 'No description available.', release_date: '', tmdbId: null };
+}
+
+// --- UI RENDERING ---
+function updateStatus(message) {
+    loadingStatus.innerText = message;
+}
+
+function renderMainHub() {
+    hubContent.innerHTML = '';
+    if (state.continueWatching.length > 0) hubContent.appendChild(createCarousel('Continue Watching', state.continueWatching, 'continue'));
+    if (state.library.tvSeries.length > 0) hubContent.appendChild(createCarousel('TV Shows', state.library.tvSeries, 'tvSeries'));
+    if (state.library.movies.length > 0) hubContent.appendChild(createCarousel('Movies', state.library.movies, 'movie'));
+    if (state.library.filmSeries.length > 0) hubContent.appendChild(createCarousel('Film Series', state.library.filmSeries, 'filmSeries'));
+}
+
+function createCarousel(title, items, type) {
+    const section = document.createElement('div');
+    section.className = 'mb-8';
+    section.innerHTML = `<h2 class="text-2xl font-bold mb-4">${title}</h2>`;
+    const carousel = document.createElement('div');
+    carousel.className = 'carousel';
+    items.forEach((item, index) => {
+        const posterUrl = item.poster || 'https://placehold.co/500x750/1f2937/374151?text=No+Poster';
+        const card = document.createElement('div');
+        card.className = 'poster-card w-40 sm:w-48 mr-4 cursor-pointer';
+        card.innerHTML = `
+            <img src="${posterUrl}" class="rounded-lg w-full aspect-[2/3] object-cover bg-gray-800">
+            <p class="mt-2 text-sm truncate">${item.name}</p>
+        `;
+        
+        let clickHandler;
+        if (type === 'continue') {
+            clickHandler = () => openPlayer(item);
+        } else if (type === 'movie') {
+            clickHandler = () => showDetails(item, { type });
+        } else if (type === 'tvSeries' || type === 'filmSeries') {
+            clickHandler = () => showDetails(item, { type, seriesId: item.tmdbId });
+        }
+        card.addEventListener('click', clickHandler);
+        
+        carousel.appendChild(card);
+    });
+    section.appendChild(carousel);
+    return section;
+}
+
+function showDetails(item, context) {
+    const year = item.release_date ? `(${item.release_date.substring(0, 4)})` : '';
+    const backdropUrl = item.backdrop || '';
+    
+    let contentHtml = `
+        <div class="absolute top-4 left-4 z-10">
+            <button onclick="closeDetails()" class="bg-gray-800/50 hover:bg-gray-700/70 p-2 rounded-full">&larr; Back</button>
+        </div>
+        <div class="h-[60vh] w-full bg-cover bg-center" style="background-image: linear-gradient(to top, #111827 10%, transparent 50%), url('${backdropUrl}');"></div>
+        <div class="p-4 sm:p-8 -mt-32 relative">
+            <h1 class="text-4xl font-bold">${item.name} ${year}</h1>
+            <p class="mt-4 max-w-2xl text-gray-300">${item.overview}</p>
+    `;
+
+    if (context.type === 'movie') {
+        contentHtml += `<button onclick='openPlayer(${JSON.stringify({ ...item, type: context.type })})' class="mt-6 bg-red-600 hover:bg-red-700 px-8 py-3 rounded-lg font-semibold">Play Movie</button>`;
+    } else if (context.type === 'tvSeries' || context.type === 'filmSeries') {
+        item.seasons.forEach((season, seasonIndex) => {
+            contentHtml += `<h3 class="text-2xl font-bold mt-8 mb-4">${season.name}</h3><div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">`;
+            season.episodes.forEach((episode, episodeIndex) => {
+                const episodeContext = { ...item, type: context.type, driveId: episode.driveId, seriesId: item.tmdbId, seasonIndex, episodeIndex, episodeName: episode.name };
+                contentHtml += `
+                    <div onclick='openPlayer(${JSON.stringify(episodeContext)})' class="bg-gray-800 p-4 rounded-lg cursor-pointer hover:bg-gray-700">
+                       <p class="font-semibold truncate">${episode.name}</p>
+                    </div>`;
+            });
+            contentHtml += `</div>`;
+        });
+    }
+    
+    contentHtml += `</div>`;
+    detailsContent.innerHTML = contentHtml;
+    detailsModal.style.display = 'block';
+}
+
+function closeDetails() {
+    detailsModal.style.display = 'none';
+    detailsContent.innerHTML = '';
+}
+
+// --- PLAYER LOGIC ---
+function openPlayer(itemContext) {
+    state.currentPlaying = itemContext;
+    updateContinueWatching(itemContext);
+    
+    const embedUrl = `https://drive.google.com/file/d/${itemContext.driveId}/preview`;
+    playerContainer.innerHTML = `<iframe src="${embedUrl}" frameborder="0" allow="autoplay; fullscreen" allowfullscreen></iframe>`;
+    videoPlayer.style.display = 'flex';
+
+    // Set up next episode logic if it's a series
+    if ((itemContext.type === 'tvSeries' || itemContext.type === 'filmSeries') && hasNextEpisode(itemContext)) {
+        setTimeout(() => startNextEpisodeCountdown(itemContext), 5000); // Wait 5s before showing button
+    }
+}
+
+closePlayer.addEventListener('click', () => {
+    playerContainer.innerHTML = ''; // Stop video
+    videoPlayer.style.display = 'none';
+    clearTimeout(state.nextEpisodeTimer);
+    nextEpisodeContainer.style.display = 'none';
+    state.currentPlaying = null;
+});
+
+function startNextEpisodeCountdown() {
+    // This is a simulation. In a real app, this would be tied to video's `timeupdate` event.
+    // Due to iframe restrictions, we just show it after a delay and auto-play after another delay.
+    // Let's show the button after a fixed time, e.g., 2 minutes.
+    clearTimeout(state.nextEpisodeTimer);
+    state.nextEpisodeTimer = setTimeout(() => {
+        nextEpisodeContainer.style.display = 'block';
+        let count = 5;
+        nextEpisodeCountdown.innerText = count;
+        const interval = setInterval(() => {
+            count--;
+            nextEpisodeCountdown.innerText = count;
+            if (count <= 0) {
+                clearInterval(interval);
+                playNextEpisode();
+            }
+        }, 1000);
+        playNextNow.onclick = () => {
+            clearInterval(interval);
+            playNextEpisode();
+        };
+    }, 120000); // Show next episode button after 2 minutes (120,000 ms) as a demo
+}
+
+function hasNextEpisode(context) {
+    if (!context || context.type === 'movie') return false;
+    const series = state.library[context.type === 'tvSeries' ? 'tvSeries' : 'filmSeries'].find(s => s.tmdbId === context.seriesId);
+    if (!series) return false;
+    const season = series.seasons[context.seasonIndex];
+    return context.episodeIndex < season.episodes.length - 1;
+}
+
+function playNextEpisode() {
+    if (!hasNextEpisode(state.currentPlaying)) return;
+    
+    const series = state.library[state.currentPlaying.type === 'tvSeries' ? 'tvSeries' : 'filmSeries'].find(s => s.tmdbId === state.currentPlaying.seriesId);
+    const nextEpisodeIndex = state.currentPlaying.episodeIndex + 1;
+    const nextEpisode = series.seasons[state.currentPlaying.seasonIndex].episodes[nextEpisodeIndex];
+
+    const nextContext = {
+        ...state.currentPlaying,
+        driveId: nextEpisode.driveId,
+        episodeIndex: nextEpisodeIndex,
+        episodeName: nextEpisode.name
+    };
+
+    nextEpisodeContainer.style.display = 'none';
+    openPlayer(nextContext);
+}
+
+// --- CONTINUE WATCHING LOGIC ---
+function updateContinueWatching(item) {
+    let list = state.continueWatching;
+    // Remove if already in list
+    list = list.filter(i => i.driveId !== item.driveId);
+    // Add to the front
+    list.unshift(item);
+    // Keep list size reasonable, e.g., 10 items
+    if (list.length > 10) list.pop();
+    state.continueWatching = list;
+    localStorage.setItem(config.CONTINUE_WATCHING_STORAGE, JSON.stringify(list));
+    renderMainHub(); // Re-render to show update
+}
+</script>
+</body>
+</html>
+```eof
+```markdown:Instructions:README.md
+# Setup Guide for Your Super Drive Hub
+
+Follow these steps carefully to get the necessary API Keys. This allows the app to securely access your Google Drive videos and fetch rich metadata like posters and descriptions.
+
+**This is a one-time setup.**
+
+---
+
+### Step 1: Get Google Drive Credentials (API Key & Client ID)
+
+This process authorizes the app to **read** the contents of your Drive.
+
+1.  **Create a Project:** Go to the [Google Cloud Console](https://console.cloud.google.com/), create a **"NEW PROJECT"** and give it a name like `My Super Hub`.
+
+2.  **Enable the API:** In the search bar at the top, find and **ENABLE** the **"Google Drive API"**.
+
+3.  **Create API Key:**
+    * In the left menu, go to **APIs & Services > Credentials**.
+    * Click **"+ CREATE CREDENTIALS"** and select **"API key"**.
+    * **Copy the key** shown in the popup. This is your `Google API Key`.
+
+4.  **Create OAuth Client ID:**
+    * On the same **Credentials** page, click **"+ CREATE CREDENTIALS"** > **"OAuth client ID"**.
+    * You'll be asked to **"CONFIGURE CONSENT SCREEN"**.
+        * Choose **"External"** and click **"CREATE"**.
+        * **App name:** `Super Drive Hub`
+        * **User support email:** Your email.
+        * **Developer contact information:** Your email again.
+        * Click **"SAVE AND CONTINUE"** until you get back to the dashboard.
+    * Go back to **Credentials** and click **"+ CREATE CREDENTIALS"** > **"OAuth client ID"** again.
+        * **Application type:** `Web application`.
+        * **Name:** `Web Client 1`.
+        * Under **"Authorized JavaScript origins"**, click **"+ ADD URI"** and add `http://localhost:8000`.
+        * Click **"CREATE"**.
+    * **Copy the `Client ID`** shown in the popup.
+
+---
+
+### Step 2: Get TMDb API Key
+
+This key is needed to fetch posters, overviews, and other details for your movies and shows.
+
+1.  **Create an Account:** Go to [The Movie Database (TMDb)](https://www.themoviedb.org/) and sign up for a free account.
+2.  **Go to API Settings:** After signing in, click your profile icon, go to **Settings**, then click the **"API"** tab in the left menu.
+3.  **Request a Key:** Click the link to request an API key (or create one). Choose the "Developer" option.
+4.  **Accept Terms:** Agree to their terms of service. You'll be asked for some details about your use case. You can fill it in like this:
+    * **Type of Use:** Personal
+    * **Application Name:** My Drive Hub
+    * **Application URL:** (You can leave this blank or put `http://localhost`)
+    * **Application Summary:** A personal, web-based interface for my Google Drive videos.
+5.  **Copy Your Key:** Once approved, you will be shown your API Key. It will be labeled as **API Key (v3 auth)**. **Copy this key.**
+
+---
+
+### Step 3: Use the App!
+
+1.  You now have all three keys: `Google API Key`, `Google Client ID`, and `TMDb API Key`.
+2.  Open the `index.html` file in the Google Chrome browser on your phone.
+3.  Enter all three keys into the respective fields.
+4.  Click **"Connect & Scan Library"**.
+5.  Sign in with your Google account and grant permission.
+6.  The app will now scan your `Entertainment` folder. **This first scan might take a few minutes** as it needs to find all your files and fetch the metadata for them. Future loads will be much faster as the data will be cached.
+
+### Important Note on Limitations
+
+* **Continue Watching:** This feature marks the last video you *started* watching. Because the video plays inside a secure `iframe` from Google, the app cannot track your exact progress (e.g., stopping at 15:32). It will always resume from the beginning of the episode/movie.
+* **Auto-Play Next:** The "next episode" button will appear after a fixed time (I've set it to 2 minutes as a placeholder) because the app can't know when the video has actually finished. It will then show a 5-second countdown before automatically playing the next one.
