@@ -18,7 +18,7 @@
         .carousel > div { scroll-snap-align: start; flex-shrink: 0; }
         .modal-bg { backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px); }
 
-        /* --- New Animation Classes --- */
+        /* --- Animation Classes --- */
         .view { transition: opacity 0.3s ease-in-out, transform 0.3s ease-in-out; }
         .modal-view { transition: opacity 0.3s ease-in-out; }
         .modal-content { transition: transform 0.3s ease-in-out, opacity 0.3s ease-in-out; }
@@ -43,7 +43,6 @@
 <body class="bg-gray-900 text-white antialiased">
 
     <div id="app">
-        <!-- Loading & Credentials Screen -->
         <div id="loadingScreen" class="min-h-screen flex items-center justify-center p-4">
             <div id="credentialsBox" class="w-full max-w-md bg-gray-800 rounded-2xl shadow-lg p-8 hidden">
                 <h1 class="text-3xl font-bold text-center mb-2 text-red-500">Super Drive Hub</h1>
@@ -58,20 +57,17 @@
              <div id="loadingIndicator" class="text-center"><div class="animate-spin rounded-full h-12 w-12 border-b-2 border-red-500 mx-auto"></div><p id="loadingStatus" class="mt-4 text-lg">Initializing...</p></div>
         </div>
 
-        <!-- Main Hub View -->
         <div id="mainHub" class="hidden p-4 sm:p-6 md:p-8 view">
              <div class="flex justify-between items-center mb-6"><h1 class="text-3xl font-bold text-red-500">Browse</h1><button id="logoutButton" class="text-gray-400 hover:text-white transition-colors duration-200">Logout</button></div>
              <div id="hubContent"></div>
              <div id="scanButtonContainer" class="text-center my-8 hidden"><button id="scanButton" class="bg-blue-600 hover:bg-blue-700 text-white font-bold py-3 px-6 rounded-lg">Scan Google Drive for Media</button><p class="text-sm text-gray-400 mt-2">Required for first-time setup or to find new content.</p></div>
         </div>
 
-        <!-- Details Modal -->
         <div id="detailsModal" class="hidden fixed inset-0 z-40 overflow-y-auto modal-view">
             <div class="fixed inset-0 bg-black bg-opacity-75 modal-bg"></div>
             <div id="detailsContentWrapper" class="relative min-h-screen modal-content"></div>
         </div>
         
-        <!-- Grid View -->
         <div id="gridView" class="hidden fixed inset-0 z-30 bg-gray-900 overflow-y-auto view">
             <div class="p-4 sm:p-6 md:p-8">
                 <div class="flex justify-between items-center mb-6">
@@ -83,7 +79,6 @@
         </div>
     </div>
     
-    <!-- SCRIPT is placed at the end of body -->
     <script>
         // --- CONFIG, STATE & DOM ---
         const config = {
@@ -143,6 +138,10 @@
         }
 
         // --- UI TRANSITIONS & NAVIGATION ---
+        function showCredentialsScreen() {
+            $('loadingIndicator').style.display = 'none';
+            $('credentialsBox').style.display = 'block';
+        }
         function switchToMainHub() {
             $('loadingScreen').style.display = 'none';
             $('mainHub').style.display = 'block';
@@ -171,12 +170,117 @@
             }
         }
 
-        // --- LIBRARY SCANNING (Functions are self-contained and unchanged) ---
-        async function startLibraryScan() { /* Unchanged */ }
-        async function findFolderId(name) { /* Unchanged */ }
-        async function listItemsInFolder(folderId, query = "") { /* Unchanged */ }
-        async function processMovieFolder(folderId) { /* Unchanged */ }
-        async function processSeriesFolder(folderId, type) { /* Unchanged */ }
+        // --- LIBRARY SCANNING ---
+        async function startLibraryScan() {
+            const scanBtnContainer = $('scanButtonContainer');
+            const loadingScr = $('loadingScreen');
+            const loadingInd = $('loadingIndicator');
+            scanBtnContainer.style.display = 'none';
+            loadingScr.style.display = 'flex';
+            loadingInd.style.display = 'block';
+            try {
+                updateStatus(`Finding '${config.MAIN_FOLDER_NAME}' folder...`);
+                const mainFolderId = await findFolderId(config.MAIN_FOLDER_NAME);
+                if (!mainFolderId) {
+                    updateStatus(`Error: Main folder '${config.MAIN_FOLDER_NAME}' not found.`);
+                    setTimeout(() => { switchToMainHub(); scanBtnContainer.style.display = 'block'; }, 3000);
+                    return;
+                }
+                updateStatus("Scanning library structure...");
+                const subFolders = await listItemsInFolder(mainFolderId, "mimeType='application/vnd.google-apps.folder'");
+                const newLibrary = { movies: [], filmSeries: [], tvSeries: [] };
+                for (const folder of subFolders) {
+                    if (folder.name.toLowerCase() === 'movies') {
+                        updateStatus("Processing Movies...");
+                        newLibrary.movies = await processMovieFolder(folder.id);
+                    } else if (folder.name.toLowerCase() === 'film series') {
+                        updateStatus("Processing Film Series...");
+                        newLibrary.filmSeries = await processSeriesFolder(folder.id, 'filmSeries');
+                    } else if (folder.name.toLowerCase() === 'series') {
+                        updateStatus("Processing TV Series...");
+                        newLibrary.tvSeries = await processSeriesFolder(folder.id, 'tvSeries');
+                    }
+                }
+                state.library = newLibrary;
+                localStorage.setItem(config.LIBRARY_STORAGE, JSON.stringify(state.library));
+                switchToMainHub();
+            } catch (error) {
+                console.error("Library Scan Failed:", error);
+                updateStatus("An error occurred during the scan. Please check console.");
+                setTimeout(() => { switchToMainHub(); scanBtnContainer.style.display = 'block'; }, 3000);
+            }
+        }
+        async function findFolderId(name) {
+            const response = await gapi.client.drive.files.list({
+                q: `mimeType='application/vnd.google-apps.folder' and name='${name}' and trashed=false`,
+                fields: "files(id)",
+                pageSize: 1
+            });
+            return response.result.files?.[0]?.id;
+        }
+        async function listItemsInFolder(folderId, query = "") {
+            let items = [];
+            let pageToken = null;
+            const baseQuery = `'${folderId}' in parents and trashed=false`;
+            const finalQuery = query ? `${baseQuery} and (${query})` : baseQuery;
+            do {
+                const response = await gapi.client.drive.files.list({
+                    q: finalQuery,
+                    fields: "nextPageToken, files(id, name)",
+                    pageSize: 200,
+                    pageToken: pageToken
+                });
+                items.push(...response.result.files);
+                pageToken = response.result.nextPageToken;
+            } while (pageToken);
+            return items;
+        }
+        async function processMovieFolder(folderId) {
+            const movieFolders = await listItemsInFolder(folderId, "mimeType='application/vnd.google-apps.folder'");
+            const movies = [];
+            for (const movieFolder of movieFolders) {
+                const videoFiles = await listItemsInFolder(movieFolder.id, "mimeType contains 'video/'");
+                if (videoFiles.length > 0) {
+                    const tmdbData = await getTMDbData(movieFolder.name, 'movie');
+                    movies.push({ driveId: videoFiles[0].id, name: movieFolder.name, type: 'movie', ...tmdbData });
+                }
+            }
+            return movies;
+        }
+        async function processSeriesFolder(folderId, type) {
+            const seriesFolders = await listItemsInFolder(folderId, "mimeType='application/vnd.google-apps.folder'");
+            const seriesList = [];
+            for (const seriesFolder of seriesFolders) {
+                updateStatus(`Processing: ${seriesFolder.name}`);
+                const tmdbData = await getTMDbData(seriesFolder.name, type === 'tvSeries' ? 'tv' : 'movie');
+                const seriesItem = { name: seriesFolder.name, type: type, ...tmdbData, seasons: [] };
+                if (type === 'tvSeries') {
+                    const seasonFolders = await listItemsInFolder(seriesFolder.id, "mimeType='application/vnd.google-apps.folder'");
+                    seasonFolders.sort((a, b) => a.name.localeCompare(b.name, undefined, { numeric: true }));
+                    for (const seasonFolder of seasonFolders) {
+                        const episodes = await listItemsInFolder(seasonFolder.id, "mimeType contains 'video/'");
+                        episodes.sort((a, b) => a.name.localeCompare(b.name, undefined, { numeric: true }));
+                        seriesItem.seasons.push({
+                            name: seasonFolder.name,
+                            episodes: episodes.map(ep => ({ name: ep.name, driveId: ep.id }))
+                        });
+                    }
+                } else { // Film Series
+                    const movieFolders = await listItemsInFolder(seriesFolder.id, "mimeType='application/vnd.google-apps.folder'");
+                    movieFolders.sort((a, b) => a.name.localeCompare(b.name, undefined, { numeric: true }));
+                    const movies = [];
+                    for (const movieFolder of movieFolders) {
+                        const videoFiles = await listItemsInFolder(movieFolder.id, "mimeType contains 'video/'");
+                        if (videoFiles.length > 0) {
+                            movies.push({ name: movieFolder.name, driveId: videoFiles[0].id });
+                        }
+                    }
+                    seriesItem.seasons.push({ name: "Movies", episodes: movies });
+                }
+                seriesList.push(seriesItem);
+            }
+            return seriesList;
+        }
 
         // --- UI RENDERING ---
         function renderMainHub() {
@@ -273,7 +377,16 @@
                 if (!noHistory && window.location.hash.startsWith('#details')) history.back();
             }
         }
-        function findAndShowDetails(tmdbId) { /* Unchanged */ }
+        function findAndShowDetails(tmdbId) {
+            for (const category of ['movies', 'tvSeries', 'filmSeries']) {
+                const item = state.library[category]?.find(i => i.tmdbId == tmdbId);
+                if (item) {
+                    const typeKeyMap = { 'movies': 'movie', 'tvSeries': 'tvSeries', 'filmSeries': 'filmSeries' };
+                    showDetails(item, { type: typeKeyMap[category] }, true);
+                    break;
+                }
+            }
+        }
 
         // --- METADATA & PLAYER ---
         async function getTMDbData(title, type, year = null) {
@@ -338,26 +451,56 @@
             window.open(`player.html?${params.toString()}`, "_blank");
         }
 
-        // --- STATE MANAGEMENT & EVENT LISTENERS ---
-        function findLibraryItem(itemToFind) { /* Unchanged */ }
-        function updateContinueWatching(item) { /* Unchanged */ }
-        $('authButton').addEventListener('click', () => { /* Unchanged */ });
-        $('logoutButton').addEventListener('click', () => { /* Unchanged */ });
+        // --- STATE MANAGEMENT ---
+        function findLibraryItem(itemToFind) {
+            if (!itemToFind || !itemToFind.type) return null;
+            const typeMap = { 'movie': 'movies', 'tvSeries': 'tvSeries', 'filmSeries': 'filmSeries' };
+            const category = typeMap[itemToFind.type];
+            if (!category) return null;
+            return state.library[category]?.find(item => item.name === itemToFind.name);
+        }
+        function updateContinueWatching(item) {
+            let continueList = state.continueWatching;
+            const driveId = item.driveId;
+            continueList = continueList.filter(cwItem => cwItem.driveId !== driveId);
+            continueList.unshift(item);
+            if (continueList.length > 15) continueList.pop();
+            state.continueWatching = continueList;
+            localStorage.setItem(config.CONTINUE_WATCHING_STORAGE, JSON.stringify(state.continueWatching));
+            renderMainHub();
+        }
+
+        // --- EVENT LISTENERS ---
+        $('authButton').addEventListener('click', () => {
+            const apiKey = $('apiKey').value.trim();
+            const clientId = $('clientId').value.trim();
+            const tmdbApiKey = $('tmdbApiKey').value.trim();
+            if (apiKey && clientId && tmdbApiKey) {
+                localStorage.setItem(config.DRIVE_API_KEY_STORAGE, apiKey);
+                localStorage.setItem(config.DRIVE_CLIENT_ID_STORAGE, clientId);
+                localStorage.setItem(config.TMDB_API_KEY_STORAGE, tmdbApiKey);
+                redirectToGoogleLogin();
+            } else {
+                alert('Please enter all three API keys.');
+            }
+        });
+        $('logoutButton').addEventListener('click', () => {
+            Object.values(config).forEach(key => localStorage.removeItem(key));
+            Object.keys(localStorage).forEach(key => {
+                if (key.startsWith('track_prefs_')) {
+                    localStorage.removeItem(key);
+                }
+            });
+            window.location.href = window.location.pathname;
+        });
         $('scanButton').addEventListener('click', startLibraryScan);
         $('closeGridBtn').addEventListener('click', () => history.back());
-        document.addEventListener('click', (e) => { if (e.target.matches('.view-all-btn')) { e.preventDefault(); showGridView(e.target.dataset.type, e.target.dataset.title); }});
-        
-        // --- Self-contained function definitions (minified for brevity but functionally identical) ---
-        async function startLibraryScan(){const t=$("scanButtonContainer"),e=$("loadingScreen"),o=$("loadingIndicator");t.style.display="none",e.style.display="flex",o.style.display="block";try{updateStatus(`Finding '${config.MAIN_FOLDER_NAME}' folder...`);const n=await findFolderId(config.MAIN_FOLDER_NAME);if(!n)return updateStatus(`Error: Main folder '${config.MAIN_FOLDER_NAME}' not found.`),void setTimeout(()=>{switchToMainHub(),t.style.display="block"},3e3);updateStatus("Scanning library structure...");const i=await listItemsInFolder(n,"mimeType='application/vnd.google-apps.folder'"),r={movies:[],filmSeries:[],tvSeries:[]};for(const s of i)s.name.toLowerCase()==="movies"?(updateStatus("Processing Movies..."),r.movies=await processMovieFolder(s.id)):s.name.toLowerCase()==="film series"?(updateStatus("Processing Film Series..."),r.filmSeries=await processSeriesFolder(s.id,"filmSeries")):s.name.toLowerCase()==="series"&&(updateStatus("Processing TV Series..."),r.tvSeries=await processSeriesFolder(s.id,"tvSeries"));state.library=r,localStorage.setItem(config.LIBRARY_STORAGE,JSON.stringify(state.library)),switchToMainHub()}catch(a){console.error("Library Scan Failed:",a),updateStatus("An error occurred during the scan. Please check console."),setTimeout(()=>{switchToMainHub(),t.style.display="block"},3e3)}}
-        async function findFolderId(t){const e=await gapi.client.drive.files.list({q:`mimeType='application/vnd.google-apps.folder' and name='${t}' and trashed=false`,fields:"files(id)",pageSize:1});return e.result.files?.[0]?.id}
-        async function listItemsInFolder(t,e=""){let o=[];let n=null;const i=`'${t}' in parents and trashed=false`,r=e?`${i} and (${e})`:i;do{const s=await gapi.client.drive.files.list({q:r,fields:"nextPageToken, files(id, name)",pageSize:200,pageToken:n});o.push(...s.result.files),n=s.result.nextPageToken}while(n);return o}
-        async function processMovieFolder(t){const e=await listItemsInFolder(t,"mimeType='application/vnd.google-apps.folder'"),o=[];for(const n of e){const i=await listItemsInFolder(n.id,"mimeType contains 'video/'");if(i.length>0){const r=await getTMDbData(n.name,"movie");o.push({driveId:i[0].id,name:n.name,type:"movie",...r})}}return o}
-        async function processSeriesFolder(t,e){const o=await listItemsInFolder(t,"mimeType='application/vnd.google-apps.folder'"),n=[];for(const i of o){updateStatus(`Processing: ${i.name}`);const r=await getTMDbData(i.name,e==="tvSeries"?"tv":"movie"),s={name:i.name,type:e,...r,seasons:[]};if(e==="tvSeries"){const a=await listItemsInFolder(i.id,"mimeType='application/vnd.google-apps.folder'");a.sort((c,l)=>c.name.localeCompare(l.name,void 0,{numeric:!0}));for(const d of a){const p=await listItemsInFolder(d.id,"mimeType contains 'video/'");p.sort((c,l)=>c.name.localeCompare(l.name,void 0,{numeric:!0})),s.seasons.push({name:d.name,episodes:p.map(c=>({name:c.name,driveId:c.id}))})}}else{const u=await listItemsInFolder(i.id,"mimeType='application/vnd.google-apps.folder'");u.sort((c,l)=>c.name.localeCompare(l.name,void 0,{numeric:!0}));const m=[];for(const f of u){const g=await listItemsInFolder(f.id,"mimeType contains 'video/'");g.length>0&&m.push({name:f.name,driveId:g[0].id})}s.seasons.push({name:"Movies",episodes:m})}n.push(s)}return n}
-        function findAndShowDetails(t){for(const e of["movies","tvSeries","filmSeries"]){const o=state.library[e]?.find(n=>n.tmdbId==t);if(o){const i={"movies":"movie","tvSeries":"tvSeries","filmSeries":"filmSeries"};showDetails(o,{type:i[e]},!0);break}}}
-        function findLibraryItem(t){if(!t||!t.type)return null;const e={movie:"movies",tvSeries:"tvSeries",filmSeries:"filmSeries"}[t.type];return e?state.library[e]?.find(o=>o.name===t.name):null}
-        function updateContinueWatching(t){let e=state.continueWatching;const o=t.driveId;e=e.filter(n=>n.driveId!==o),e.unshift(t),e.length>15&&e.pop(),state.continueWatching=e,localStorage.setItem(config.CONTINUE_WATCHING_STORAGE,JSON.stringify(e)),renderMainHub()}
-        $('authButton').addEventListener('click',()=>{const t=$("apiKey").value.trim(),e=$("clientId").value.trim(),o=$("tmdbApiKey").value.trim();t&&e&&o?(localStorage.setItem(config.DRIVE_API_KEY_STORAGE,t),localStorage.setItem(config.DRIVE_CLIENT_ID_STORAGE,e),localStorage.setItem(config.TMDB_API_KEY_STORAGE,o),redirectToGoogleLogin()):alert("Please enter all three API keys.")});
-        $('logoutButton').addEventListener('click',()=>{Object.values(config).forEach(t=>localStorage.removeItem(t)),Object.keys(localStorage).forEach(t=>{t.startsWith("track_prefs_")&&localStorage.removeItem(t)}),window.location.href=window.location.pathname});
+        document.addEventListener('click', (e) => {
+            if (e.target.matches('.view-all-btn')) {
+                e.preventDefault();
+                showGridView(e.target.dataset.type, e.target.dataset.title);
+            }
+        });
     </script>
 </body>
 </html>
