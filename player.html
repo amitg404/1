@@ -3,148 +3,76 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Player</title>
+    <title>Video Launchpad</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
     <style>
         body { font-family: 'Inter', sans-serif; }
     </style>
 </head>
-<body class="bg-gray-900 text-white flex flex-col h-screen antialiased">
+<body class="bg-gray-900 text-white flex items-center justify-center min-h-screen p-4">
 
-    <header class="p-4 bg-gray-800 shadow-md">
-        <h1 id="videoTitle" class="text-xl font-bold truncate">Loading...</h1>
-    </header>
-
-    <main class="flex-grow flex items-center justify-center p-4">
-        <div id="playerContainer" class="w-full h-full max-w-6xl aspect-video bg-black rounded-lg overflow-hidden shadow-2xl text-center flex items-center justify-center">
-            </div>
-    </main>
-
-    <footer class="p-4 bg-gray-800">
-        <div class="max-w-6xl mx-auto flex flex-col sm:flex-row justify-between items-center space-y-4 sm:space-y-0">
-            <div id="preferences" class="hidden">
-                <div class="flex items-center space-x-4">
-                    <div>
-                        <label for="audioPref" class="text-sm font-medium text-gray-400">Audio</label>
-                        <input type="text" id="audioPref" class="bg-gray-700 border border-gray-600 rounded-md p-1.5 text-sm w-28" placeholder="e.g., English">
-                    </div>
-                    <div>
-                        <label for="subtitlePref" class="text-sm font-medium text-gray-400">Subtitles</label>
-                        <input type="text" id="subtitlePref" class="bg-gray-700 border border-gray-600 rounded-md p-1.5 text-sm w-28" placeholder="e.g., English">
-                    </div>
-                    <button id="savePrefs" class="bg-blue-600 hover:bg-blue-700 rounded-md px-3 py-1.5 text-sm font-semibold">Save</button>
-                </div>
-                <div id="prefsReminder" class="text-xs text-amber-400 mt-2"></div>
-            </div>
-
-            <div class="flex-shrink-0">
-                <button id="nextEpisodeBtn" class="hidden bg-red-600 hover:bg-red-700 text-white font-bold py-2 px-6 rounded-lg">Next Episode &gt;</button>
-            </div>
+    <div id="container" class="w-full max-w-lg text-center">
+        <h1 id="title" class="text-3xl font-bold mb-4">Loading...</h1>
+        <p class="text-gray-400 mb-8">Your video is ready. Use the button below to play it in an external application like VLC for the best quality.</p>
+        
+        <div id="playButtonContainer">
+            <!-- The link will be set by JavaScript -->
+            <a id="playLink" href="#" class="block w-full bg-red-600 hover:bg-red-700 text-white font-bold py-4 px-6 rounded-lg text-xl transition-transform transform hover:scale-105">
+                Play in External App
+            </a>
+            <p class="text-xs text-gray-500 mt-2">On mobile, this should prompt you to choose a player. On desktop, this may download the file.</p>
         </div>
-    </footer>
+
+        <div id="nextButtonContainer" class="mt-6 hidden">
+             <!-- The link will be set by JavaScript -->
+            <a id="nextLink" href="#" class="block w-full bg-gray-700 hover:bg-gray-600 text-white font-bold py-3 px-6 rounded-lg transition-transform transform hover:scale-105">
+                Next Episode
+            </a>
+        </div>
+    </div>
 
     <script>
-        const videoTitleEl = document.getElementById('videoTitle');
-        const playerContainer = document.getElementById('playerContainer');
-        const nextEpisodeBtn = document.getElementById('nextEpisodeBtn');
-        const preferencesEl = document.getElementById('preferences');
-        const audioPrefInput = document.getElementById('audioPref');
-        const subtitlePrefInput = document.getElementById('subtitlePref');
-        const savePrefsBtn = document.getElementById('savePrefs');
-        const prefsReminderEl = document.getElementById('prefsReminder');
-        
-        let seriesId = null;
-        let nextEpisodeParams = null;
-
-        // --- On Page Load ---
         window.onload = () => {
             const params = new URLSearchParams(window.location.search);
             const driveId = params.get('driveId');
             const title = params.get('title');
-            seriesId = params.get('seriesId');
+            const accessToken = params.get('accessToken');
+            
             const nextDriveId = params.get('nextDriveId');
             const nextTitle = params.get('nextTitle');
 
-            if (!driveId) {
-                videoTitleEl.textContent = "Error: No video ID provided.";
-                return;
-            }
-            
-            // Set title and embed video
-            videoTitleEl.textContent = title || "Untitled Video";
-            const embedUrl = `https://drive.google.com/file/d/${driveId}/preview`;
-            playerContainer.innerHTML = `<iframe src="${embedUrl}" class="w-full h-full" frameborder="0" allow="autoplay; fullscreen" allowfullscreen></iframe>`;
+            if (driveId && title && accessToken) {
+                document.getElementById('title').textContent = title;
 
-            // Setup "Next Episode" button
-            if (nextDriveId) {
-                nextEpisodeBtn.style.display = 'block';
-                // Store all necessary params to construct the next URL
-                nextEpisodeParams = { 
-                    driveId: nextDriveId, 
-                    title: nextTitle, 
-                    seriesId: seriesId
-                };
-            }
+                // This is the direct, full-quality download link that external players need.
+                // It requires the access token to authenticate.
+                const directPlayUrl = `https://www.googleapis.com/drive/v3/files/${driveId}?alt=media&access_token=${accessToken}`;
+                
+                document.getElementById('playLink').href = directPlayUrl;
 
-            // Setup Preferences UI
-            if (seriesId) {
-                preferencesEl.style.display = 'block';
-                loadPreferences();
+                if (nextDriveId && nextTitle) {
+                    const nextButtonContainer = document.getElementById('nextButtonContainer');
+                    const nextLink = document.getElementById('nextLink');
+                    
+                    // Re-create the URL for the next episode's launchpad page
+                    const nextParams = new URLSearchParams();
+                    nextParams.set('driveId', nextDriveId);
+                    nextParams.set('title', nextTitle);
+                    nextParams.set('accessToken', accessToken);
+                    // We need to pass the rest of the series info along too
+                    nextParams.set('seriesId', params.get('seriesId'));
+                    
+                    nextLink.href = `player.html?${nextParams.toString()}`;
+                    nextLink.textContent = `Next: ${nextTitle}`;
+                    nextButtonContainer.classList.remove('hidden');
+                }
+
+            } else {
+                document.getElementById('title').textContent = 'Error';
+                document.getElementById('container').innerHTML += '<p class="text-red-500 mt-4">Could not load video. Necessary information is missing.</p>';
             }
         };
-
-        // --- Event Listeners ---
-        nextEpisodeBtn.addEventListener('click', () => {
-            if (nextEpisodeParams) {
-                // This is a simplified next episode logic. A more advanced version would
-                // require the main app to pass the entire season playlist to the player.
-                const params = new URLSearchParams();
-                params.set('driveId', nextEpisodeParams.driveId);
-                params.set('title', nextEpisodeParams.title);
-                params.set('seriesId', nextEpisodeParams.seriesId);
-                
-                // This will navigate to the next episode, but that page won't know
-                // what is "next" from there.
-                window.location.search = params.toString();
-            }
-        });
-
-        savePrefsBtn.addEventListener('click', () => {
-            const prefs = {
-                audio: audioPrefInput.value.trim(),
-                subs: subtitlePrefInput.value.trim()
-            };
-            localStorage.setItem(`track_prefs_${seriesId}`, JSON.stringify(prefs));
-            showReminder(prefs);
-            // Give user feedback
-            savePrefsBtn.textContent = "Saved!";
-            setTimeout(() => { savePrefsBtn.textContent = "Save"; }, 2000);
-        });
-
-        // --- Helper Functions ---
-        function loadPreferences() {
-            const savedPrefs = localStorage.getItem(`track_prefs_${seriesId}`);
-            if (savedPrefs) {
-                const prefs = JSON.parse(savedPrefs);
-                audioPrefInput.value = prefs.audio || '';
-                subtitlePrefInput.value = prefs.subs || '';
-                showReminder(prefs);
-            }
-        }
-
-        function showReminder(prefs) {
-            let reminderText = '';
-            if (prefs.audio && prefs.subs) {
-                reminderText = `Reminder: Set <b>${prefs.audio}</b> audio & <b>${prefs.subs}</b> subtitles in player ⚙️`;
-            } else if (prefs.audio) {
-                reminderText = `Reminder: Set <b>${prefs.audio}</b> audio in player ⚙️`;
-            } else if (prefs.subs) {
-                reminderText = `Reminder: Set <b>${prefs.subs}</b> subtitles in player ⚙️`;
-            }
-            prefsReminderEl.innerHTML = reminderText;
-        }
-
     </script>
 </body>
 </html>
