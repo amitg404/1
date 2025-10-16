@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Super Drive Hub v7</title>
+    <title>Super Drive Hub v8</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://apis.google.com/js/api.js"></script>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
@@ -12,16 +12,38 @@
         ::-webkit-scrollbar { width: 8px; }
         ::-webkit-scrollbar-track { background: #111827; }
         ::-webkit-scrollbar-thumb { background: #374151; border-radius: 10px; }
-        .poster-card { transition: transform 0.2s ease-in-out; }
-        .poster-card:hover { transform: scale(1.05); }
+        .poster-card { transition: transform 0.2s ease-in-out, box-shadow 0.2s ease-in-out; }
+        .poster-card:hover { transform: scale(1.05); box-shadow: 0 0 15px rgba(239, 68, 68, 0.3); }
         .carousel { display: flex; overflow-x: auto; scroll-snap-type: x mandatory; padding-bottom: 20px; }
         .carousel > div { scroll-snap-align: start; flex-shrink: 0; }
         .modal-bg { backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px); }
+
+        /* --- New Animation Classes --- */
+        .view { transition: opacity 0.3s ease-in-out, transform 0.3s ease-in-out; }
+        .modal-view { transition: opacity 0.3s ease-in-out; }
+        .modal-content { transition: transform 0.3s ease-in-out, opacity 0.3s ease-in-out; }
+        
+        .view-enter { opacity: 0; transform: scale(0.98); }
+        .view-enter-active { opacity: 1; transform: scale(1); }
+        .view-leave { opacity: 1; transform: scale(1); }
+        .view-leave-active { opacity: 0; transform: scale(0.98); }
+        
+        .modal-enter { opacity: 0; }
+        .modal-enter .modal-content { opacity: 0; transform: translateY(20px); }
+        .modal-enter-active { opacity: 1; }
+        .modal-enter-active .modal-content { opacity: 1; transform: translateY(0); }
+
+        .modal-leave { opacity: 1; }
+        .modal-leave .modal-content { opacity: 1; transform: translateY(0); }
+        .modal-leave-active { opacity: 0; }
+        .modal-leave-active .modal-content { opacity: 0; transform: translateY(20px); }
+
     </style>
 </head>
 <body class="bg-gray-900 text-white antialiased">
 
     <div id="app">
+        <!-- Loading & Credentials Screen -->
         <div id="loadingScreen" class="min-h-screen flex items-center justify-center p-4">
             <div id="credentialsBox" class="w-full max-w-md bg-gray-800 rounded-2xl shadow-lg p-8 hidden">
                 <h1 class="text-3xl font-bold text-center mb-2 text-red-500">Super Drive Hub</h1>
@@ -36,15 +58,21 @@
              <div id="loadingIndicator" class="text-center"><div class="animate-spin rounded-full h-12 w-12 border-b-2 border-red-500 mx-auto"></div><p id="loadingStatus" class="mt-4 text-lg">Initializing...</p></div>
         </div>
 
-        <div id="mainHub" class="hidden p-4 sm:p-6 md:p-8">
+        <!-- Main Hub View -->
+        <div id="mainHub" class="hidden p-4 sm:p-6 md:p-8 view">
              <div class="flex justify-between items-center mb-6"><h1 class="text-3xl font-bold text-red-500">Browse</h1><button id="logoutButton" class="text-gray-400 hover:text-white transition-colors duration-200">Logout</button></div>
              <div id="hubContent"></div>
              <div id="scanButtonContainer" class="text-center my-8 hidden"><button id="scanButton" class="bg-blue-600 hover:bg-blue-700 text-white font-bold py-3 px-6 rounded-lg">Scan Google Drive for Media</button><p class="text-sm text-gray-400 mt-2">Required for first-time setup or to find new content.</p></div>
         </div>
 
-        <div id="detailsModal" class="hidden fixed inset-0 z-40 overflow-y-auto"><div class="fixed inset-0 bg-black bg-opacity-75 modal-bg"></div><div id="detailsContent" class="relative min-h-screen"></div></div>
+        <!-- Details Modal -->
+        <div id="detailsModal" class="hidden fixed inset-0 z-40 overflow-y-auto modal-view">
+            <div class="fixed inset-0 bg-black bg-opacity-75 modal-bg"></div>
+            <div id="detailsContentWrapper" class="relative min-h-screen modal-content"></div>
+        </div>
         
-        <div id="gridView" class="hidden fixed inset-0 z-30 bg-gray-900 overflow-y-auto">
+        <!-- Grid View -->
+        <div id="gridView" class="hidden fixed inset-0 z-30 bg-gray-900 overflow-y-auto view">
             <div class="p-4 sm:p-6 md:p-8">
                 <div class="flex justify-between items-center mb-6">
                     <h2 id="gridTitle" class="text-3xl font-bold text-red-500"></h2>
@@ -54,536 +82,282 @@
             </div>
         </div>
     </div>
-
-<script>
-// --- CONFIG & STATE ---
-const config = {
-    DRIVE_API_KEY_STORAGE: 'superdrivehub_v7_google_api_key',
-    DRIVE_CLIENT_ID_STORAGE: 'superdrivehub_v7_google_client_id',
-    TMDB_API_KEY_STORAGE: 'superdrivehub_v7_tmdb_api_key',
-    LIBRARY_STORAGE: 'superdrivehub_v7_library_cache',
-    CONTINUE_WATCHING_STORAGE: 'superdrivehub_v7_continue_watching',
-    TMDB_BASE_URL: 'https://api.themoviedb.org/3',
-    TMDB_IMG_URL: 'https://image.tmdb.org/t/p/w500',
-    MAIN_FOLDER_NAME: 'Entertainment'
-};
-
-let state = {
-    library: { movies: [], filmSeries: [], tvSeries: [] },
-    continueWatching: [],
-    activeDetailItem: null,
-};
-
-// --- DOM ELEMENT SELECTORS ---
-const loadingScreen = document.getElementById('loadingScreen');
-const credentialsBox = document.getElementById('credentialsBox');
-const loadingIndicator = document.getElementById('loadingIndicator');
-const loadingStatus = document.getElementById('loadingStatus');
-const mainHub = document.getElementById('mainHub');
-const hubContent = document.getElementById('hubContent');
-const scanButtonContainer = document.getElementById('scanButtonContainer');
-const detailsModal = document.getElementById('detailsModal');
-const detailsContent = document.getElementById('detailsContent');
-const gridView = document.getElementById('gridView');
-const gridTitle = document.getElementById('gridTitle');
-const gridContent = document.getElementById('gridContent');
-const closeGridBtn = document.getElementById('closeGridBtn');
-const authButton = document.getElementById('authButton');
-const logoutButton = document.getElementById('logoutButton');
-const scanButton = document.getElementById('scanButton');
-
-function updateStatus(message) {
-    loadingStatus.innerText = message;
-}
-
-// --- INITIALIZATION ---
-window.onload = () => {
-    document.getElementById('apiKey').value = localStorage.getItem(config.DRIVE_API_KEY_STORAGE) || '';
-    document.getElementById('clientId').value = localStorage.getItem(config.DRIVE_CLIENT_ID_STORAGE) || '';
-    document.getElementById('tmdbApiKey').value = localStorage.getItem(config.TMDB_API_KEY_STORAGE) || '';
     
-    const cachedLibrary = localStorage.getItem(config.LIBRARY_STORAGE);
-    if (cachedLibrary) state.library = JSON.parse(cachedLibrary);
-    
-    const continueWatchingData = localStorage.getItem(config.CONTINUE_WATCHING_STORAGE);
-    if (continueWatchingData) state.continueWatching = JSON.parse(continueWatchingData);
-    
-    window.addEventListener('popstate', handlePopState);
-    handlePopState(); // Handle initial state on page load/reload
-    handleRedirect();
-};
+    <!-- SCRIPT is placed at the end of body -->
+    <script>
+        // --- CONFIG, STATE & DOM ---
+        const config = {
+            DRIVE_API_KEY_STORAGE: 'superdrivehub_v8_google_api_key', DRIVE_CLIENT_ID_STORAGE: 'superdrivehub_v8_google_client_id', TMDB_API_KEY_STORAGE: 'superdrivehub_v8_tmdb_api_key', LIBRARY_STORAGE: 'superdrivehub_v8_library_cache', CONTINUE_WATCHING_STORAGE: 'superdrivehub_v8_continue_watching', TMDB_BASE_URL: 'https://api.themoviedb.org/3', TMDB_IMG_URL: 'https://image.tmdb.org/t/p/w500', MAIN_FOLDER_NAME: 'Entertainment'
+        };
+        let state = { library: { movies: [], filmSeries: [], tvSeries: [] }, continueWatching: [], activeDetailItem: null, accessToken: null };
+        const $ = (selector) => document.getElementById(selector);
 
-function showCredentialsScreen() {
-    loadingIndicator.style.display = 'none';
-    credentialsBox.style.display = 'block';
-}
+        // --- INITIALIZATION ---
+        window.onload = () => {
+            $('apiKey').value = localStorage.getItem(config.DRIVE_API_KEY_STORAGE) || '';
+            $('clientId').value = localStorage.getItem(config.DRIVE_CLIENT_ID_STORAGE) || '';
+            $('tmdbApiKey').value = localStorage.getItem(config.TMDB_API_KEY_STORAGE) || '';
+            const cachedLibrary = localStorage.getItem(config.LIBRARY_STORAGE);
+            if (cachedLibrary) state.library = JSON.parse(cachedLibrary);
+            const continueWatchingData = localStorage.getItem(config.CONTINUE_WATCHING_STORAGE);
+            if (continueWatchingData) state.continueWatching = JSON.parse(continueWatchingData);
+            window.addEventListener('popstate', handlePopState);
+            handlePopState();
+            handleRedirect();
+        };
 
-// --- GOOGLE AUTH & API ---
-function handleRedirect() {
-    const fragment = new URLSearchParams(window.location.hash.substring(1));
-    const accessToken = fragment.get('access_token');
-    if (accessToken) {
-        gapi.load('client', () => {
-            gapi.client.setToken({ access_token: accessToken });
-            window.history.replaceState({}, document.title, window.location.pathname);
-            initializeGapiClient();
-        });
-    } else {
-        if (localStorage.getItem(config.DRIVE_CLIENT_ID_STORAGE)) {
-            showCredentialsScreen();
-        } else {
-            showCredentialsScreen();
-        }
-    }
-}
-
-function redirectToGoogleLogin() {
-    const CLIENT_ID = localStorage.getItem(config.DRIVE_CLIENT_ID_STORAGE);
-    const REDIRECT_URI = window.location.href.split('#')[0];
-    const SCOPE = 'https://www.googleapis.com/auth/drive.readonly';
-    const authUrl = `https://accounts.google.com/o/oauth2/v2/auth?client_id=${CLIENT_ID}&redirect_uri=${encodeURIComponent(REDIRECT_URI)}&scope=${SCOPE}&response_type=token&include_granted_scopes=true`;
-    window.location.href = authUrl;
-}
-
-async function initializeGapiClient() {
-    try {
-        updateStatus("Initializing Drive API...");
-        await gapi.client.init({
-            apiKey: localStorage.getItem(config.DRIVE_API_KEY_STORAGE),
-            discoveryDocs: ['https://www.googleapis.com/discovery/v1/apis/drive/v3/rest'],
-        });
-        switchToMainHub();
-    } catch (error) {
-        console.error("GAPI client initialization error:", error);
-        alert("Failed to initialize Google Drive API. Please check your API Key.");
-        showCredentialsScreen();
-    }
-}
-
-function switchToMainHub() {
-    loadingScreen.style.display = 'none';
-    mainHub.style.display = 'block';
-    if (state.library.movies.length === 0 && state.library.tvSeries.length === 0 && state.library.filmSeries.length === 0) {
-        scanButtonContainer.style.display = 'block';
-    } else {
-        scanButtonContainer.style.display = 'none';
-        renderMainHub();
-    }
-}
-
-// --- NAVIGATION & HISTORY ---
-function handlePopState() {
-    const hash = window.location.hash;
-    if (hash.startsWith('#details/')) {
-        if (detailsModal.style.display !== 'block') {
-            const tmdbId = hash.split('/')[1];
-            findAndShowDetails(tmdbId);
-        }
-    } else if (hash.startsWith('#grid/')) {
-        if (gridView.style.display !== 'block') {
-            const type = hash.split('/')[1];
-            showGridView(type);
-        }
-    } else {
-        closeDetails(true);
-        hideGridView(true);
-    }
-}
-
-// --- LIBRARY SCANNING ---
-async function startLibraryScan() {
-    scanButtonContainer.style.display = 'none';
-    loadingScreen.style.display = 'flex';
-    loadingIndicator.style.display = 'block';
-    try {
-        updateStatus(`Finding '${config.MAIN_FOLDER_NAME}' folder...`);
-        const mainFolderId = await findFolderId(config.MAIN_FOLDER_NAME);
-        if (!mainFolderId) {
-            updateStatus(`Error: Main folder '${config.MAIN_FOLDER_NAME}' not found.`);
-            setTimeout(() => { switchToMainHub(); scanButtonContainer.style.display = 'block'; }, 3000);
-            return;
-        }
-        updateStatus("Scanning library structure...");
-        const subFolders = await listItemsInFolder(mainFolderId, "mimeType='application/vnd.google-apps.folder'");
-        const newLibrary = { movies: [], filmSeries: [], tvSeries: [] };
-        for (const folder of subFolders) {
-            if (folder.name.toLowerCase() === 'movies') {
-                updateStatus("Processing Movies...");
-                newLibrary.movies = await processMovieFolder(folder.id);
-            } else if (folder.name.toLowerCase() === 'film series') {
-                updateStatus("Processing Film Series...");
-                newLibrary.filmSeries = await processSeriesFolder(folder.id, 'filmSeries');
-            } else if (folder.name.toLowerCase() === 'series') {
-                updateStatus("Processing TV Series...");
-                newLibrary.tvSeries = await processSeriesFolder(folder.id, 'tvSeries');
+        // --- GOOGLE AUTH & API ---
+        function handleRedirect() {
+            const fragment = new URLSearchParams(window.location.hash.substring(1));
+            const token = fragment.get('access_token');
+            if (token) {
+                state.accessToken = token;
+                gapi.load('client', () => {
+                    gapi.client.setToken({ access_token: state.accessToken });
+                    window.history.replaceState({}, document.title, window.location.pathname);
+                    initializeGapiClient();
+                });
+            } else if (localStorage.getItem(config.DRIVE_CLIENT_ID_STORAGE)) {
+                showCredentialsScreen();
+            } else {
+                showCredentialsScreen();
             }
         }
-        state.library = newLibrary;
-        localStorage.setItem(config.LIBRARY_STORAGE, JSON.stringify(state.library));
-        switchToMainHub();
-    } catch (error) {
-        console.error("Library Scan Failed:", error);
-        updateStatus("An error occurred during the scan. Please check console.");
-        setTimeout(() => { switchToMainHub(); scanButtonContainer.style.display = 'block'; }, 3000);
-    }
-}
-
-async function findFolderId(name) {
-    const response = await gapi.client.drive.files.list({
-        q: `mimeType='application/vnd.google-apps.folder' and name='${name}' and trashed=false`,
-        fields: "files(id)",
-        pageSize: 1
-    });
-    return response.result.files?.[0]?.id;
-}
-
-async function listItemsInFolder(folderId, query = "") {
-    let items = [];
-    let pageToken = null;
-    const baseQuery = `'${folderId}' in parents and trashed=false`;
-    const finalQuery = query ? `${baseQuery} and (${query})` : baseQuery;
-    do {
-        const response = await gapi.client.drive.files.list({
-            q: finalQuery,
-            fields: "nextPageToken, files(id, name)",
-            pageSize: 200,
-            pageToken: pageToken
-        });
-        items.push(...response.result.files);
-        pageToken = response.result.nextPageToken;
-    } while (pageToken);
-    return items;
-}
-
-async function processMovieFolder(folderId) {
-    const movieFolders = await listItemsInFolder(folderId, "mimeType='application/vnd.google-apps.folder'");
-    const movies = [];
-    for (const movieFolder of movieFolders) {
-        const videoFiles = await listItemsInFolder(movieFolder.id, "mimeType contains 'video/'");
-        if (videoFiles.length > 0) {
-            const tmdbData = await getTMDbData(movieFolder.name, 'movie');
-            movies.push({ driveId: videoFiles[0].id, name: movieFolder.name, type: 'movie', ...tmdbData });
+        async function initializeGapiClient() {
+            try {
+                updateStatus("Initializing Drive API...");
+                await gapi.client.init({ apiKey: localStorage.getItem(config.DRIVE_API_KEY_STORAGE), discoveryDocs: ['https://www.googleapis.com/discovery/v1/apis/drive/v3/rest'] });
+                switchToMainHub();
+            } catch (error) {
+                console.error("GAPI client initialization error:", error);
+                alert("Failed to initialize Google Drive API. Please check your API Key.");
+                showCredentialsScreen();
+            }
         }
-    }
-    return movies;
-}
+        function redirectToGoogleLogin() {
+            const CLIENT_ID = localStorage.getItem(config.DRIVE_CLIENT_ID_STORAGE);
+            const REDIRECT_URI = window.location.href.split('#')[0];
+            const SCOPE = 'https://www.googleapis.com/auth/drive.readonly';
+            const authUrl = `https://accounts.google.com/o/oauth2/v2/auth?client_id=${CLIENT_ID}&redirect_uri=${encodeURIComponent(REDIRECT_URI)}&scope=${SCOPE}&response_type=token`;
+            window.location.href = authUrl;
+        }
 
-async function processSeriesFolder(folderId, type) {
-    const seriesFolders = await listItemsInFolder(folderId, "mimeType='application/vnd.google-apps.folder'");
-    const seriesList = [];
-    for (const seriesFolder of seriesFolders) {
-        updateStatus(`Processing: ${seriesFolder.name}`);
-        const tmdbData = await getTMDbData(seriesFolder.name, type === 'tvSeries' ? 'tv' : 'movie');
-        const seriesItem = { name: seriesFolder.name, type: type, ...tmdbData, seasons: [] };
-        
-        if (type === 'tvSeries') {
-            const seasonFolders = await listItemsInFolder(seriesFolder.id, "mimeType='application/vnd.google-apps.folder'");
-            seasonFolders.sort((a, b) => a.name.localeCompare(b.name, undefined, { numeric: true }));
-            for (const seasonFolder of seasonFolders) {
-                const episodes = await listItemsInFolder(seasonFolder.id, "mimeType contains 'video/'");
-                episodes.sort((a, b) => a.name.localeCompare(b.name, undefined, { numeric: true }));
-                seriesItem.seasons.push({
-                    name: seasonFolder.name,
-                    episodes: episodes.map(ep => ({ name: ep.name, driveId: ep.id }))
+        // --- UI TRANSITIONS & NAVIGATION ---
+        function switchToMainHub() {
+            $('loadingScreen').style.display = 'none';
+            $('mainHub').style.display = 'block';
+            if (state.library.movies.length === 0 && state.library.tvSeries.length === 0 && state.library.filmSeries.length === 0) {
+                $('scanButtonContainer').style.display = 'block';
+            } else {
+                $('scanButtonContainer').style.display = 'none';
+                renderMainHub();
+            }
+        }
+        function handlePopState() {
+            const hash = window.location.hash;
+            if (hash.startsWith('#details/')) {
+                if ($('detailsModal').style.display !== 'block') {
+                    const tmdbId = hash.split('/')[1];
+                    findAndShowDetails(tmdbId);
+                }
+            } else if (hash.startsWith('#grid/')) {
+                if ($('gridView').style.display !== 'block') {
+                    const type = hash.split('/')[1];
+                    showGridView(type);
+                }
+            } else {
+                closeDetails(true);
+                hideGridView(true);
+            }
+        }
+
+        // --- LIBRARY SCANNING (Functions are self-contained and unchanged) ---
+        async function startLibraryScan() { /* Unchanged */ }
+        async function findFolderId(name) { /* Unchanged */ }
+        async function listItemsInFolder(folderId, query = "") { /* Unchanged */ }
+        async function processMovieFolder(folderId) { /* Unchanged */ }
+        async function processSeriesFolder(folderId, type) { /* Unchanged */ }
+
+        // --- UI RENDERING ---
+        function renderMainHub() {
+            const hub = $('hubContent');
+            hub.innerHTML = "";
+            if (state.continueWatching.length > 0) hub.appendChild(createCarousel("Continue Watching", state.continueWatching, "continue"));
+            if (state.library.tvSeries.length > 0) hub.appendChild(createCarousel("TV Shows", state.library.tvSeries, "tvSeries"));
+            if (state.library.movies.length > 0) hub.appendChild(createCarousel("Movies", state.library.movies, "movie"));
+            if (state.library.filmSeries.length > 0) hub.appendChild(createCarousel("Film Series", state.library.filmSeries, "filmSeries"));
+        }
+        function createCarousel(title, items, type) {
+            const section = document.createElement('div');
+            section.className = 'mb-8';
+            section.innerHTML = `<div class="flex justify-between items-center mb-4"><h2 class="text-2xl font-bold">${title}</h2><button class="text-sm font-semibold text-red-400 hover:text-red-300 view-all-btn" data-type="${type}" data-title="${title}">View All &gt;</button></div>`;
+            const carousel = document.createElement('div');
+            carousel.className = 'carousel';
+            items.forEach((item) => {
+                const posterUrl = item.poster || 'https://placehold.co/500x750/1f2937/374151?text=No+Poster';
+                const card = document.createElement('div');
+                card.className = 'poster-card w-40 sm:w-48 mr-4 cursor-pointer';
+                card.innerHTML = `<img src="${posterUrl}" class="rounded-lg w-full aspect-[2/3] object-cover bg-gray-800"><p class="mt-2 text-sm truncate">${item.name}</p>`;
+                card.addEventListener('click', () => showDetails(findLibraryItem(item) || item, { type }));
+                carousel.appendChild(card);
+            });
+            section.appendChild(carousel);
+            return section;
+        }
+        function showGridView(type, title, noHistory) {
+            let items = type === 'continue' ? state.continueWatching : state.library[{ 'movie': 'movies', 'tvSeries': 'tvSeries', 'filmSeries': 'filmSeries' }[type]];
+            if (!items) return;
+            $('gridTitle').textContent = title;
+            const grid = $('gridContent');
+            grid.innerHTML = '';
+            items.forEach(item => {
+                const posterUrl = item.poster || 'https://placehold.co/500x750/1f2937/374151?text=No+Poster';
+                const card = document.createElement('div');
+                card.className = 'poster-card cursor-pointer';
+                card.innerHTML = `<img src="${posterUrl}" class="rounded-lg w-full aspect-[2/3] object-cover bg-gray-800"><p class="mt-2 text-sm truncate">${item.name}</p>`;
+                card.addEventListener('click', () => showDetails(findLibraryItem(item) || item, { type }));
+                grid.appendChild(card);
+            });
+            $('mainHub').classList.add('view-leave-active');
+            $('gridView').style.display = 'block';
+            $('gridView').classList.remove('view-leave-active');
+            $('gridView').classList.add('view-enter-active');
+            if (!noHistory) history.pushState({ view: 'grid', type: type }, '', `#grid/${type}`);
+        }
+        function hideGridView(noHistory) {
+            if ($('gridView').style.display === 'block') {
+                $('gridView').classList.add('view-leave-active');
+                $('mainHub').classList.remove('view-leave-active');
+                $('mainHub').classList.add('view-enter-active');
+                setTimeout(() => $('gridView').style.display = 'none', 300);
+                if (!noHistory) history.pushState({ view: 'hub' }, '', window.location.pathname);
+            }
+        }
+        function showDetails(item, context, noHistory) {
+            state.activeDetailItem = { item, context };
+            const year = item.release_date ? `(${item.release_date.substring(0, 4)})` : '';
+            const backdropUrl = item.backdrop || '';
+            let contentHtml = `<div class="absolute top-4 left-4 z-10 flex space-x-2"><button onclick="history.back()" class="bg-gray-800/50 hover:bg-gray-700/70 py-2 px-4 rounded-lg">&larr; Back</button><button onclick="handleMetadataCorrection()" class="bg-blue-600/80 hover:bg-blue-500/90 py-2 px-4 rounded-lg">Fix Match</button></div><div class="h-[60vh] w-full bg-cover bg-center" style="background-image: linear-gradient(to top, #111827 10%, transparent 50%), url('${backdropUrl}');"></div><div class="p-4 sm:p-8 -mt-32 relative"><h1 class="text-4xl font-bold">${item.name} ${year}</h1><p class="mt-4 max-w-2xl text-gray-300">${item.overview}</p>`;
+            if (item.type === 'movie') {
+                contentHtml += `<button onclick='openPlayer(${JSON.stringify(item)})' class="mt-6 bg-red-600 hover:bg-red-700 px-8 py-3 rounded-lg font-semibold">Play Movie</button>`;
+            } else {
+                item.seasons.forEach((season, seasonIndex) => {
+                    contentHtml += `<h3 class="text-2xl font-bold mt-8 mb-4">${season.name}</h3><div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">`;
+                    season.episodes.forEach((episode, episodeIndex) => {
+                        const epContext = { ...item, driveId: episode.driveId, name: episode.name, seasonIndex, episodeIndex };
+                        contentHtml += `<div onclick='openPlayer(${JSON.stringify(epContext)})' class="bg-gray-800 p-4 rounded-lg cursor-pointer hover:bg-gray-700"><p class="font-semibold truncate">${episode.name}</p></div>`;
+                    });
+                    contentHtml += `</div>`;
                 });
             }
-        } else { // Film Series
-            const movieFolders = await listItemsInFolder(seriesFolder.id, "mimeType='application/vnd.google-apps.folder'");
-            movieFolders.sort((a, b) => a.name.localeCompare(b.name, undefined, { numeric: true }));
-            const movies = [];
-            for (const movieFolder of movieFolders) {
-                const videoFiles = await listItemsInFolder(movieFolder.id, "mimeType contains 'video/'");
-                if (videoFiles.length > 0) {
-                    movies.push({ name: movieFolder.name, driveId: videoFiles[0].id });
+            contentHtml += `</div>`;
+            $('detailsContentWrapper').innerHTML = contentHtml;
+            const modal = $('detailsModal');
+            modal.style.display = 'block';
+            modal.classList.remove('modal-leave', 'modal-leave-active');
+            modal.classList.add('modal-enter');
+            requestAnimationFrame(() => modal.classList.add('modal-enter-active'));
+            if (!noHistory) history.pushState({ view: 'details', tmdbId: item.tmdbId }, '', `#details/${item.tmdbId}`);
+        }
+        function closeDetails(noHistory) {
+            const modal = $('detailsModal');
+            if (modal.style.display === 'block') {
+                modal.classList.remove('modal-enter', 'modal-enter-active');
+                modal.classList.add('modal-leave');
+                requestAnimationFrame(() => modal.classList.add('modal-leave-active'));
+                setTimeout(() => {
+                    modal.style.display = 'none';
+                    $('detailsContentWrapper').innerHTML = '';
+                    state.activeDetailItem = null;
+                }, 300);
+                if (!noHistory && window.location.hash.startsWith('#details')) history.back();
+            }
+        }
+        function findAndShowDetails(tmdbId) { /* Unchanged */ }
+
+        // --- METADATA & PLAYER ---
+        async function getTMDbData(title, type, year = null) {
+            const tmdbApiKey = localStorage.getItem(config.TMDB_API_KEY_STORAGE);
+            const cleanedTitle = title.replace(/\(.*\)|\[.*\]/g, "").trim();
+            let url = `${config.TMDB_BASE_URL}/search/${type}?api_key=${tmdbApiKey}&query=${encodeURIComponent(cleanedTitle)}`;
+            if (year) url += `&year=${year}`;
+            try {
+                const response = await fetch(url);
+                const data = await response.json();
+                const result = data.results?.[0];
+                if (result) return { poster: result.poster_path ? `${config.TMDB_IMG_URL}${result.poster_path}` : null, backdrop: result.backdrop_path ? `${config.TMDB_IMG_URL.replace("w500","w1280")}${result.backdrop_path}` : null, overview: result.overview, release_date: result.release_date || result.first_air_date, tmdbId: result.id };
+            } catch (error) { console.error(`TMDb fetch failed for ${title}:`, error); }
+            return { poster: null, backdrop: null, overview: "No description available.", release_date: "", tmdbId: null };
+        }
+        async function handleMetadataCorrection() {
+            const { item, context } = state.activeDetailItem;
+            const input = prompt(`Enter TMDb URL or Name (Year) for "${item.name}":\n(e.g., Iron Man (2008))`);
+            if (!input) return;
+            let newMetadata;
+            const urlMatch = input.match(/(movie|tv)\/(\d+)/);
+            if (urlMatch) {
+                const [_, type, id] = urlMatch;
+                const tmdbApiKey = localStorage.getItem(config.TMDB_API_KEY_STORAGE);
+                const url = `${config.TMDB_BASE_URL}/${type}/${id}?api_key=${tmdbApiKey}`;
+                try {
+                    const response = await fetch(url);
+                    const data = await response.json();
+                    newMetadata = { poster: data.poster_path ? `${config.TMDB_IMG_URL}${data.poster_path}`:null, backdrop: data.backdrop_path ? `${config.TMDB_IMG_URL.replace("w500","w1280")}${data.backdrop_path}`:null, overview: data.overview, release_date: data.release_date || data.first_air_date, tmdbId: data.id };
+                } catch (e) { alert("Failed to fetch data from TMDb URL."); return; }
+            } else {
+                const nameMatch = input.match(/^(.*?)\s*\((\d{4})\)?$/);
+                const searchName = nameMatch ? nameMatch[1].trim() : input;
+                const searchYear = nameMatch ? nameMatch[2] : null;
+                const searchType = context.type === 'tvSeries' ? 'tv' : 'movie';
+                newMetadata = await getTMDbData(searchName, searchType, searchYear);
+                if (!newMetadata.tmdbId) { alert(`Could not find a match for "${input}"`); return; }
+            }
+            Object.assign(item, newMetadata);
+            localStorage.setItem(config.LIBRARY_STORAGE, JSON.stringify(state.library));
+            showDetails(item, context);
+            renderMainHub();
+        }
+        function openPlayer(itemContext) {
+            updateContinueWatching(itemContext);
+            const params = new URLSearchParams();
+            params.set("driveId", itemContext.driveId);
+            params.set("title", itemContext.name);
+            params.set("accessToken", state.accessToken); // Pass the token for direct links
+            if (itemContext.type !== 'movie') {
+                params.set("seriesId", itemContext.tmdbId);
+                const libraryItem = findLibraryItem(itemContext);
+                if (libraryItem?.seasons) {
+                    const currentSeason = libraryItem.seasons[itemContext.seasonIndex];
+                    if (itemContext.episodeIndex < currentSeason.episodes.length - 1) {
+                        const nextEpisode = currentSeason.episodes[itemContext.episodeIndex + 1];
+                        params.set("nextDriveId", nextEpisode.driveId);
+                        params.set("nextTitle", nextEpisode.name);
+                    }
                 }
             }
-            seriesItem.seasons.push({ name: "Movies", episodes: movies });
+            window.open(`player.html?${params.toString()}`, "_blank");
         }
-        seriesList.push(seriesItem);
-    }
-    return seriesList;
-}
 
-// --- UI RENDERING ---
-function renderMainHub() {
-    hubContent.innerHTML = "";
-    if (state.continueWatching.length > 0) hubContent.appendChild(createCarousel("Continue Watching", state.continueWatching, "continue"));
-    if (state.library.tvSeries.length > 0) hubContent.appendChild(createCarousel("TV Shows", state.library.tvSeries, "tvSeries"));
-    if (state.library.movies.length > 0) hubContent.appendChild(createCarousel("Movies", state.library.movies, "movie"));
-    if (state.library.filmSeries.length > 0) hubContent.appendChild(createCarousel("Film Series", state.library.filmSeries, "filmSeries"));
-}
-
-function createCarousel(title, items, type) {
-    const section = document.createElement('div');
-    section.className = 'mb-8';
-    section.innerHTML = `
-        <div class="flex justify-between items-center mb-4">
-            <h2 class="text-2xl font-bold">${title}</h2>
-            <button class="text-sm font-semibold text-red-400 hover:text-red-300 view-all-btn" data-type="${type}" data-title="${title}">View All &gt;</button>
-        </div>`;
-    const carousel = document.createElement('div');
-    carousel.className = 'carousel';
-    items.forEach((item) => {
-        const posterUrl = item.poster || 'https://placehold.co/500x750/1f2937/374151?text=No+Poster';
-        const card = document.createElement('div');
-        card.className = 'poster-card w-40 sm:w-48 mr-4 cursor-pointer';
-        card.innerHTML = `<img src="${posterUrl}" class="rounded-lg w-full aspect-[2/3] object-cover bg-gray-800"><p class="mt-2 text-sm truncate">${item.name}</p>`;
+        // --- STATE MANAGEMENT & EVENT LISTENERS ---
+        function findLibraryItem(itemToFind) { /* Unchanged */ }
+        function updateContinueWatching(item) { /* Unchanged */ }
+        $('authButton').addEventListener('click', () => { /* Unchanged */ });
+        $('logoutButton').addEventListener('click', () => { /* Unchanged */ });
+        $('scanButton').addEventListener('click', startLibraryScan);
+        $('closeGridBtn').addEventListener('click', () => history.back());
+        document.addEventListener('click', (e) => { if (e.target.matches('.view-all-btn')) { e.preventDefault(); showGridView(e.target.dataset.type, e.target.dataset.title); }});
         
-        const libraryItem = type === 'continue' ? findLibraryItem(item) || item : item;
-        card.addEventListener('click', () => {
-            if (type === 'continue') openPlayer(libraryItem);
-            else showDetails(libraryItem, { type });
-        });
-        carousel.appendChild(card);
-    });
-    section.appendChild(carousel);
-    return section;
-}
-
-function showGridView(type, title, noHistory) {
-    let items;
-    if (type === 'continue') items = state.continueWatching;
-    else {
-        const typeKeyMap = { 'movie': 'movies', 'tvSeries': 'tvSeries', 'filmSeries': 'filmSeries' };
-        items = state.library[typeKeyMap[type]];
-    }
-    
-    if (!items) return;
-
-    gridTitle.textContent = title;
-    gridContent.innerHTML = ''; 
-
-    items.forEach(item => {
-        const posterUrl = item.poster || 'https://placehold.co/500x750/1f2937/374151?text=No+Poster';
-        const card = document.createElement('div');
-        card.className = 'poster-card cursor-pointer';
-        card.innerHTML = `<img src="${posterUrl}" class="rounded-lg w-full aspect-[2/3] object-cover bg-gray-800"><p class="mt-2 text-sm truncate">${item.name}</p>`;
-        
-        const libraryItem = type === 'continue' ? findLibraryItem(item) || item : item;
-        card.addEventListener('click', () => {
-            if (type === 'continue') openPlayer(libraryItem);
-            else showDetails(libraryItem, { type });
-        });
-        gridContent.appendChild(card);
-    });
-    
-    mainHub.style.display = 'none';
-    gridView.style.display = 'block';
-
-    if (!noHistory) {
-        history.pushState({ view: 'grid', type: type }, '', `#grid/${type}`);
-    }
-}
-
-function hideGridView(noHistory) {
-    if (gridView.style.display === 'block') {
-        gridView.style.display = 'none';
-        mainHub.style.display = 'block';
-        if (!noHistory) {
-            history.pushState({ view: 'hub' }, '', window.location.pathname);
-        }
-    }
-}
-
-function showDetails(item, context, noHistory) {
-    state.activeDetailItem = { item, context };
-    const year = item.release_date ? `(${item.release_date.substring(0, 4)})` : '';
-    const backdropUrl = item.backdrop || '';
-    
-    let contentHtml = `
-        <div class="absolute top-4 left-4 z-10 flex space-x-2">
-            <button onclick="history.back()" class="bg-gray-800/50 hover:bg-gray-700/70 py-2 px-4 rounded-lg">&larr; Back</button>
-            <button onclick="handleMetadataCorrection()" class="bg-blue-600/80 hover:bg-blue-500/90 py-2 px-4 rounded-lg">Fix Match</button>
-        </div>
-        <div class="h-[60vh] w-full bg-cover bg-center" style="background-image: linear-gradient(to top, #111827 10%, transparent 50%), url('${backdropUrl}');"></div>
-        <div class="p-4 sm:p-8 -mt-32 relative">
-            <h1 class="text-4xl font-bold">${item.name} ${year}</h1>
-            <p class="mt-4 max-w-2xl text-gray-300">${item.overview}</p>`;
-
-    if (item.type === 'movie') {
-        contentHtml += `<button onclick='openPlayer(${JSON.stringify(item)})' class="mt-6 bg-red-600 hover:bg-red-700 px-8 py-3 rounded-lg font-semibold">Play Movie</button>`;
-    } else {
-        item.seasons.forEach((season, seasonIndex) => {
-            contentHtml += `<h3 class="text-2xl font-bold mt-8 mb-4">${season.name}</h3><div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">`;
-            season.episodes.forEach((episode, episodeIndex) => {
-                const epContext = { ...item, driveId: episode.driveId, name: episode.name, seasonIndex, episodeIndex };
-                contentHtml += `<div onclick='openPlayer(${JSON.stringify(epContext)})' class="bg-gray-800 p-4 rounded-lg cursor-pointer hover:bg-gray-700"><p class="font-semibold truncate">${episode.name}</p></div>`;
-            });
-            contentHtml += `</div>`;
-        });
-    }
-    contentHtml += `</div>`;
-    
-    detailsContent.innerHTML = contentHtml;
-    detailsModal.style.display = 'block';
-
-    if (!noHistory) {
-        history.pushState({ view: 'details', tmdbId: item.tmdbId }, '', `#details/${item.tmdbId}`);
-    }
-}
-
-function closeDetails(noHistory) {
-    if (detailsModal.style.display === 'block') {
-        detailsModal.style.display = 'none';
-        detailsContent.innerHTML = '';
-        state.activeDetailItem = null;
-        if (!noHistory && window.location.hash.startsWith('#details')) {
-            history.back();
-        }
-    }
-}
-
-function findAndShowDetails(tmdbId) {
-    for (const category of ['movies', 'tvSeries', 'filmSeries']) {
-        const item = state.library[category]?.find(i => i.tmdbId == tmdbId);
-        if (item) {
-            const typeKeyMap = { 'movies': 'movie', 'tvSeries': 'tvSeries', 'filmSeries': 'filmSeries' };
-            showDetails(item, { type: typeKeyMap[category] }, true);
-            break;
-        }
-    }
-}
-
-// --- METADATA & PLAYER ---
-async function getTMDbData(title, type) {
-    const tmdbApiKey = localStorage.getItem(config.TMDB_API_KEY_STORAGE);
-    const cleanedTitle = title.replace(/\(.*\)|\[.*\]/g, "").trim();
-    const url = `${config.TMDB_BASE_URL}/search/${type}?api_key=${tmdbApiKey}&query=${encodeURIComponent(cleanedTitle)}`;
-    try {
-        const response = await fetch(url);
-        const data = await response.json();
-        const result = data.results?.[0];
-        if (result) {
-            return {
-                poster: result.poster_path ? `${config.TMDB_IMG_URL}${result.poster_path}` : null,
-                backdrop: result.backdrop_path ? `${config.TMDB_IMG_URL.replace("w500","w1280")}${result.backdrop_path}` : null,
-                overview: result.overview,
-                release_date: result.release_date || result.first_air_date,
-                tmdbId: result.id
-            };
-        }
-    } catch (error) {
-        console.error(`TMDb fetch failed for ${title}:`, error);
-    }
-    return { poster: null, backdrop: null, overview: "No description available.", release_date: "", tmdbId: null };
-}
-
-async function handleMetadataCorrection() {
-    const { item, context } = state.activeDetailItem;
-    const newUrl = prompt(`Enter the correct TMDb URL for "${item.name}":\n(e.g., https://www.themoviedb.org/tv/1668-friends)`);
-    if (!newUrl) return;
-
-    const match = newUrl.match(/(movie|tv)\/(\d+)/);
-    if (!match) {
-        alert("Invalid URL format. Please use a valid TMDb movie or TV show URL.");
-        return;
-    }
-    
-    const [_, type, id] = match;
-    const tmdbApiKey = localStorage.getItem(config.TMDB_API_KEY_STORAGE);
-    const url = `${config.TMDB_BASE_URL}/${type}/${id}?api_key=${tmdbApiKey}`;
-    
-    try {
-        const response = await fetch(url);
-        const data = await response.json();
-        const newMetadata = {
-            poster: data.poster_path ? `${config.TMDB_IMG_URL}${data.poster_path}` : null,
-            backdrop: data.backdrop_path ? `${config.TMDB_IMG_URL.replace("w500", "w1280")}${data.backdrop_path}` : null,
-            overview: data.overview,
-            release_date: data.release_date || data.first_air_date,
-            tmdbId: data.id
-        };
-        
-        Object.assign(item, newMetadata);
-        localStorage.setItem(config.LIBRARY_STORAGE, JSON.stringify(state.library));
-        showDetails(item, context); // Re-render the details modal
-        renderMainHub(); // Re-render the hub in the background
-    } catch (error) {
-        alert("Failed to fetch data from TMDb. Please check the URL and your API key.");
-        console.error("TMDb fetch error:", error);
-    }
-}
-
-function openPlayer(itemContext) {
-    updateContinueWatching(itemContext);
-    const params = new URLSearchParams();
-    params.set("driveId", itemContext.driveId);
-    params.set("title", itemContext.name);
-
-    if (itemContext.type !== 'movie') {
-        params.set("seriesId", itemContext.tmdbId);
-        const libraryItem = findLibraryItem(itemContext);
-        if (libraryItem && libraryItem.seasons) {
-            const currentSeason = libraryItem.seasons[itemContext.seasonIndex];
-            if (itemContext.episodeIndex < currentSeason.episodes.length - 1) {
-                const nextEpisode = currentSeason.episodes[itemContext.episodeIndex + 1];
-                params.set("nextDriveId", nextEpisode.driveId);
-                params.set("nextTitle", nextEpisode.name);
-            }
-        }
-    }
-    window.open(`player.html?${params.toString()}`, "_blank");
-}
-
-// --- STATE MANAGEMENT ---
-function findLibraryItem(itemToFind) {
-    if (!itemToFind || !itemToFind.type) return null;
-    const typeMap = { 'movie': 'movies', 'tvSeries': 'tvSeries', 'filmSeries': 'filmSeries' };
-    const category = typeMap[itemToFind.type];
-    if (!category) return null;
-    return state.library[category]?.find(item => item.name === itemToFind.name);
-}
-
-function updateContinueWatching(item) {
-    let continueList = state.continueWatching;
-    const driveId = item.driveId;
-    continueList = continueList.filter(cwItem => cwItem.driveId !== driveId); // Remove if exists
-    continueList.unshift(item); // Add to the front
-    if (continueList.length > 15) continueList.pop(); // Limit to 15 items
-    state.continueWatching = continueList;
-    localStorage.setItem(config.CONTINUE_WATCHING_STORAGE, JSON.stringify(state.continueWatching));
-    renderMainHub();
-}
-
-// --- EVENT LISTENERS ---
-authButton.addEventListener('click', () => {
-    const apiKey = document.getElementById('apiKey').value.trim();
-    const clientId = document.getElementById('clientId').value.trim();
-    const tmdbApiKey = document.getElementById('tmdbApiKey').value.trim();
-    if (apiKey && clientId && tmdbApiKey) {
-        localStorage.setItem(config.DRIVE_API_KEY_STORAGE, apiKey);
-        localStorage.setItem(config.DRIVE_CLIENT_ID_STORAGE, clientId);
-        localStorage.setItem(config.TMDB_API_KEY_STORAGE, tmdbApiKey);
-        redirectToGoogleLogin();
-    } else {
-        alert('Please enter all three API keys.');
-    }
-});
-
-logoutButton.addEventListener('click', () => {
-    Object.values(config).forEach(key => localStorage.removeItem(key));
-    // Also clear any legacy track preference keys
-    Object.keys(localStorage).forEach(key => {
-        if (key.startsWith('track_prefs_')) {
-            localStorage.removeItem(key);
-        }
-    });
-    window.location.href = window.location.pathname; // Reload to start screen
-});
-
-scanButton.addEventListener('click', startLibraryScan);
-
-closeGridBtn.addEventListener('click', () => history.back());
-
-document.addEventListener('click', (e) => {
-    if (e.target && e.target.classList.contains('view-all-btn')) {
-        e.preventDefault();
-        const type = e.target.dataset.type;
-        const title = e.target.dataset.title;
-        showGridView(type, title);
-    }
-});
-
-</script>
+        // --- Self-contained function definitions (minified for brevity but functionally identical) ---
+        async function startLibraryScan(){const t=$("scanButtonContainer"),e=$("loadingScreen"),o=$("loadingIndicator");t.style.display="none",e.style.display="flex",o.style.display="block";try{updateStatus(`Finding '${config.MAIN_FOLDER_NAME}' folder...`);const n=await findFolderId(config.MAIN_FOLDER_NAME);if(!n)return updateStatus(`Error: Main folder '${config.MAIN_FOLDER_NAME}' not found.`),void setTimeout(()=>{switchToMainHub(),t.style.display="block"},3e3);updateStatus("Scanning library structure...");const i=await listItemsInFolder(n,"mimeType='application/vnd.google-apps.folder'"),r={movies:[],filmSeries:[],tvSeries:[]};for(const s of i)s.name.toLowerCase()==="movies"?(updateStatus("Processing Movies..."),r.movies=await processMovieFolder(s.id)):s.name.toLowerCase()==="film series"?(updateStatus("Processing Film Series..."),r.filmSeries=await processSeriesFolder(s.id,"filmSeries")):s.name.toLowerCase()==="series"&&(updateStatus("Processing TV Series..."),r.tvSeries=await processSeriesFolder(s.id,"tvSeries"));state.library=r,localStorage.setItem(config.LIBRARY_STORAGE,JSON.stringify(state.library)),switchToMainHub()}catch(a){console.error("Library Scan Failed:",a),updateStatus("An error occurred during the scan. Please check console."),setTimeout(()=>{switchToMainHub(),t.style.display="block"},3e3)}}
+        async function findFolderId(t){const e=await gapi.client.drive.files.list({q:`mimeType='application/vnd.google-apps.folder' and name='${t}' and trashed=false`,fields:"files(id)",pageSize:1});return e.result.files?.[0]?.id}
+        async function listItemsInFolder(t,e=""){let o=[];let n=null;const i=`'${t}' in parents and trashed=false`,r=e?`${i} and (${e})`:i;do{const s=await gapi.client.drive.files.list({q:r,fields:"nextPageToken, files(id, name)",pageSize:200,pageToken:n});o.push(...s.result.files),n=s.result.nextPageToken}while(n);return o}
+        async function processMovieFolder(t){const e=await listItemsInFolder(t,"mimeType='application/vnd.google-apps.folder'"),o=[];for(const n of e){const i=await listItemsInFolder(n.id,"mimeType contains 'video/'");if(i.length>0){const r=await getTMDbData(n.name,"movie");o.push({driveId:i[0].id,name:n.name,type:"movie",...r})}}return o}
+        async function processSeriesFolder(t,e){const o=await listItemsInFolder(t,"mimeType='application/vnd.google-apps.folder'"),n=[];for(const i of o){updateStatus(`Processing: ${i.name}`);const r=await getTMDbData(i.name,e==="tvSeries"?"tv":"movie"),s={name:i.name,type:e,...r,seasons:[]};if(e==="tvSeries"){const a=await listItemsInFolder(i.id,"mimeType='application/vnd.google-apps.folder'");a.sort((c,l)=>c.name.localeCompare(l.name,void 0,{numeric:!0}));for(const d of a){const p=await listItemsInFolder(d.id,"mimeType contains 'video/'");p.sort((c,l)=>c.name.localeCompare(l.name,void 0,{numeric:!0})),s.seasons.push({name:d.name,episodes:p.map(c=>({name:c.name,driveId:c.id}))})}}else{const u=await listItemsInFolder(i.id,"mimeType='application/vnd.google-apps.folder'");u.sort((c,l)=>c.name.localeCompare(l.name,void 0,{numeric:!0}));const m=[];for(const f of u){const g=await listItemsInFolder(f.id,"mimeType contains 'video/'");g.length>0&&m.push({name:f.name,driveId:g[0].id})}s.seasons.push({name:"Movies",episodes:m})}n.push(s)}return n}
+        function findAndShowDetails(t){for(const e of["movies","tvSeries","filmSeries"]){const o=state.library[e]?.find(n=>n.tmdbId==t);if(o){const i={"movies":"movie","tvSeries":"tvSeries","filmSeries":"filmSeries"};showDetails(o,{type:i[e]},!0);break}}}
+        function findLibraryItem(t){if(!t||!t.type)return null;const e={movie:"movies",tvSeries:"tvSeries",filmSeries:"filmSeries"}[t.type];return e?state.library[e]?.find(o=>o.name===t.name):null}
+        function updateContinueWatching(t){let e=state.continueWatching;const o=t.driveId;e=e.filter(n=>n.driveId!==o),e.unshift(t),e.length>15&&e.pop(),state.continueWatching=e,localStorage.setItem(config.CONTINUE_WATCHING_STORAGE,JSON.stringify(e)),renderMainHub()}
+        $('authButton').addEventListener('click',()=>{const t=$("apiKey").value.trim(),e=$("clientId").value.trim(),o=$("tmdbApiKey").value.trim();t&&e&&o?(localStorage.setItem(config.DRIVE_API_KEY_STORAGE,t),localStorage.setItem(config.DRIVE_CLIENT_ID_STORAGE,e),localStorage.setItem(config.TMDB_API_KEY_STORAGE,o),redirectToGoogleLogin()):alert("Please enter all three API keys.")});
+        $('logoutButton').addEventListener('click',()=>{Object.values(config).forEach(t=>localStorage.removeItem(t)),Object.keys(localStorage).forEach(t=>{t.startsWith("track_prefs_")&&localStorage.removeItem(t)}),window.location.href=window.location.pathname});
+    </script>
 </body>
 </html>
