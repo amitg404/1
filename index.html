@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Super Drive Hub v10</title>
+    <title>Super Drive Hub v11</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://apis.google.com/js/api.js"></script>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
@@ -18,24 +18,22 @@
         .carousel { display: flex; overflow-x: auto; scroll-snap-type: x mandatory; padding-bottom: 20px; }
         .carousel > div { scroll-snap-align: start; flex-shrink: 0; }
         .modal-bg { backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px); }
-
-        /* Animation Classes */
         .view { transition: opacity 0.3s ease-in-out, transform 0.3s ease-in-out; }
-        .modal-view { transition: opacity 0.3s ease-in-out; }
-        .modal-content { transition: transform 0.3s ease-in-out, opacity 0.3s ease-in-out; }
+        .modal-view, #playerModal { transition: opacity 0.3s ease-in-out; }
+        .modal-content, #playerContainer { transition: transform 0.3s ease-in-out, opacity 0.3s ease-in-out; }
         .view-enter-active, .modal-enter-active, .view-leave, .modal-leave { opacity: 1; transform: none; }
         .view-enter, .view-leave-active { opacity: 0; transform: scale(0.98); }
         .modal-enter, .modal-leave-active { opacity: 0; }
         .modal-enter .modal-content, .modal-leave-active .modal-content { opacity: 0; transform: translateY(20px); }
         .modal-leave .modal-content { opacity: 1; transform: translateY(0); }
-        
-        /* Integrated Player Styles */
-        #playerModal { transition: background-color 0.3s ease-in-out; }
-        #playerContainer { transition: transform 0.3s ease-in-out; }
-        .player-enter #playerContainer { transform: translateY(100%); }
-        .player-enter-active #playerContainer { transform: translateY(0); }
-        .player-leave-active #playerContainer { transform: translateY(100%); }
+        .score-dial { width: 70px; height: 70px; border-radius: 50%; display: flex; align-items: center; justify-content: center; background: radial-gradient(closest-side, #081c22 85%, transparent 86%), conic-gradient(var(--score-color, #ef4444) calc(var(--score, 0) * 1%), #374151 0); }
+        .backdrop-carousel::-webkit-scrollbar { display: none; }
+        @keyframes kenburns { 0% { transform: scale(1); } 100% { transform: scale(1.15); } }
+        .backdrop-img { animation: kenburns 40s ease-in-out infinite alternate; }
+        #playerContainer { transform: translateY(100%); }
+        #playerModal.active #playerContainer { transform: translateY(0); }
         .video-js .vjs-big-play-button { background-color: rgba(239, 68, 68, 0.8) !important; border-color: rgba(239, 68, 68, 0.9) !important; }
+        .watched-indicator { position: absolute; bottom: 0; left: 0; right: 0; height: 4px; background-color: rgba(239, 68, 68, 0.8); border-radius: 0 0 8px 8px; }
     </style>
 </head>
 <body class="bg-gray-900 text-white antialiased">
@@ -55,15 +53,30 @@
                 </div>
                 <div id="loadingIndicator" class="text-center"><div class="animate-spin rounded-full h-12 w-12 border-b-2 border-red-500 mx-auto"></div><p id="loadingStatus" class="mt-4 text-lg">Initializing...</p></div>
             </div>
+
             <div id="mainHub" class="hidden p-4 sm:p-6 md:p-8 view">
-                <div class="flex justify-between items-center mb-6"><h1 class="text-3xl font-bold text-red-500">Browse</h1><button id="logoutButton" class="text-gray-400 hover:text-white transition-colors duration-200">Logout</button></div>
+                <header class="flex justify-between items-center mb-6">
+                    <h1 class="text-3xl font-bold text-red-500">Browse</h1>
+                    <div class="flex items-center space-x-4">
+                        <div class="relative" id="actionsMenuContainer">
+                            <button id="actionsMenuBtn" class="bg-gray-800 hover:bg-gray-700 py-2 px-4 rounded-lg">Library Actions</button>
+                            <div id="actionsDropdown" class="hidden absolute right-0 mt-2 w-48 bg-gray-800 rounded-lg shadow-lg z-20">
+                                <a href="#" id="refreshMetadataBtn" class="block px-4 py-2 text-white hover:bg-gray-700">Refresh All Metadata</a>
+                                <a href="#" id="scanNewBtn" class="block px-4 py-2 text-white hover:bg-gray-700">Scan for New Content</a>
+                                <a href="#" id="fullScanBtn" class="block px-4 py-2 text-white hover:bg-gray-700">Full Library Rescan</a>
+                            </div>
+                        </div>
+                        <button id="logoutButton" class="text-gray-400 hover:text-white transition-colors duration-200">Logout</button>
+                    </div>
+                </header>
                 <div id="hubContent"></div>
-                <div id="scanButtonContainer" class="text-center my-8 hidden"><button id="scanButton" class="bg-blue-600 hover:bg-blue-700 text-white font-bold py-3 px-6 rounded-lg">Scan Google Drive for Media</button><p class="text-sm text-gray-400 mt-2">Required for first-time setup or to find new content.</p></div>
             </div>
+
             <div id="detailsModal" class="hidden fixed inset-0 z-40 overflow-y-auto modal-view">
                 <div class="fixed inset-0 bg-black bg-opacity-75 modal-bg"></div>
                 <div id="detailsContentWrapper" class="relative min-h-screen modal-content"></div>
             </div>
+
             <div id="gridView" class="hidden fixed inset-0 z-30 bg-gray-900 overflow-y-auto view">
                 <div class="p-4 sm:p-6 md:p-8">
                     <div class="flex justify-between items-center mb-6"><h2 id="gridTitle" class="text-3xl font-bold text-red-500"></h2><button id="closeGridBtn" class="bg-gray-800 hover:bg-gray-700 py-2 px-4 rounded-lg">&larr; Back</button></div>
@@ -72,12 +85,12 @@
             </div>
         </div>
 
-        <div id="playerModal" class="hidden fixed inset-0 z-50 bg-black/80 player-enter">
+        <div id="playerModal" class="hidden fixed inset-0 z-50 bg-black/80">
             <div id="playerContainer" class="w-full h-full bg-black flex flex-col">
                 <div class="w-full p-4 flex justify-between items-center bg-black flex-shrink-0 z-10">
                     <button id="playerCloseBtn" class="bg-gray-800/50 hover:bg-gray-700/70 py-2 px-4 rounded-lg">&larr; Back</button>
                     <h2 id="playerTitle" class="text-lg font-bold text-center text-gray-300 truncate px-4"></h2>
-                    <button id="playerNextBtn" class="hidden bg-red-600 hover:bg-red-700 py-2 px-4 rounded-lg font-semibold">Next Episode &rarr;</button>
+                    <button id="playerNextBtn" class="hidden bg-red-600 hover:bg-red-700 py-2 px-4 rounded-lg font-semibold transition-opacity opacity-0">Next Episode &rarr;</button>
                 </div>
                 <div class="w-full flex-grow relative">
                     <video id="player-video" class="video-js vjs-big-play-centered w-full h-full" data-setup='{}'></video>
@@ -89,23 +102,29 @@
     <script src="https://vjs.zencdn.net/8.10.0/video.min.js"></script>
     <script>
         // --- CONFIG, STATE & DOM ---
-        const config = { DRIVE_API_KEY_STORAGE: 'superdrivehub_v10_google_api_key', DRIVE_CLIENT_ID_STORAGE: 'superdrivehub_v10_google_client_id', TMDB_API_KEY_STORAGE: 'superdrivehub_v10_tmdb_api_key', LIBRARY_STORAGE: 'superdrivehub_v10_library_cache', CONTINUE_WATCHING_STORAGE: 'superdrivehub_v10_continue_watching', TMDB_BASE_URL: 'https://api.themoviedb.org/3', TMDB_IMG_URL: 'https://image.tmdb.org/t/p/w500', MAIN_FOLDER_NAME: 'Entertainment' };
+        const config = { DRIVE_API_KEY_STORAGE: 'superdrivehub_v11_google_api_key', DRIVE_CLIENT_ID_STORAGE: 'superdrivehub_v11_google_client_id', TMDB_API_KEY_STORAGE: 'superdrivehub_v11_tmdb_api_key', LIBRARY_STORAGE: 'superdrivehub_v11_library_cache', CONTINUE_WATCHING_STORAGE: 'superdrivehub_v11_continue_watching', TMDB_BASE_URL: 'https://api.themoviedb.org/3', TMDB_IMG_URL: 'https://image.tmdb.org/t/p/w500', MAIN_FOLDER_NAME: 'Entertainment' };
         let state = { library: { movies: [], filmSeries: [], tvSeries: [] }, continueWatching: [], activeDetailItem: null, activePlayerItem: null, videoPlayer: null };
         const $ = (selector) => document.getElementById(selector);
         
+        // --- HELPER FUNCTIONS ---
         function updateStatus(message) { $('loadingStatus').innerText = message; }
 
         // --- INITIALIZATION ---
         window.onload = () => {
+            // Setup fields and load from localStorage
             $('apiKey').value = localStorage.getItem(config.DRIVE_API_KEY_STORAGE) || '';
             $('clientId').value = localStorage.getItem(config.DRIVE_CLIENT_ID_STORAGE) || '';
             $('tmdbApiKey').value = localStorage.getItem(config.TMDB_API_KEY_STORAGE) || '';
             const cachedLibrary = localStorage.getItem(config.LIBRARY_STORAGE); if (cachedLibrary) state.library = JSON.parse(cachedLibrary);
             const continueWatchingData = localStorage.getItem(config.CONTINUE_WATCHING_STORAGE); if (continueWatchingData) state.continueWatching = JSON.parse(continueWatchingData);
             
+            // Initialize the player once
             state.videoPlayer = videojs('player-video', { controls: true, autoplay: false, preload: 'auto' });
             
-            window.addEventListener('popstate', handlePopState);
+            // Attach all event listeners
+            attachEventListeners();
+            
+            // Handle navigation and authentication
             handlePopState();
             handleRedirect();
         };
@@ -137,143 +156,183 @@
         // --- UI TRANSITIONS & NAVIGATION ---
         function handlePopState() {
             const hash = window.location.hash;
-            if (hash.startsWith('#player/')) {
-                if ($('playerModal').style.display !== 'block') findAndPlayItem(hash.split('/')[1]);
-            } else if (hash.startsWith('#details/')) {
-                if ($('detailsModal').style.display !== 'block') findAndShowDetails(hash.split('/')[1]);
-            } else if (hash.startsWith('#grid/')) {
-                if ($('gridView').style.display !== 'block') showGridView(hash.split('/')[1]);
-            } else {
-                closeDetails(true);
-                hideGridView(true);
-                closePlayer(true);
-            }
+            if (hash.startsWith('#player/')) { if ($('playerModal').style.display !== 'block') findAndPlayItem(hash.split('/')[1]); }
+            else if (hash.startsWith('#details/')) { if ($('detailsModal').style.display !== 'block') findAndShowDetails(hash.split('/')[1]); }
+            else if (hash.startsWith('#grid/')) { if ($('gridView').style.display !== 'block') showGridView(hash.split('/')[1]); }
+            else { closeDetails(true); hideGridView(true); closePlayer(true); }
         }
 
-        // --- LIBRARY SCANNING ---
-        // Functions are self-contained and unchanged, but now call the updated getTMDbDetails
-        async function startLibraryScan() { /* Logic unchanged */ }
-        async function processMovieFolder(folderId) { /* Logic unchanged */ }
-        async function processSeriesFolder(folderId, type) { /* Logic unchanged */ }
-
+        // --- LIBRARY MANAGEMENT ---
+        async function runScan(isFullScan = false) { /* Updated Logic */ }
+        async function refreshAllMetadata() { /* New Logic */ }
+        // All other scanning functions are mostly unchanged but are called by the new logic above.
+        async function findFolderId(name) { /* Unchanged */ }
+        async function listItemsInFolder(folderId, query = "") { /* Unchanged */ }
+        async function processFolders(folders, type) { /* New helper function */ }
+        
         // --- TMDb API & METADATA ---
-        async function getTMDbDetails(tmdbId, type) { /* Logic unchanged */ }
-        async function handleMetadataCorrection() { /* Logic unchanged */ }
+        async function getTMDbDetails(tmdbId, type) { /* Unchanged */ }
+        async function handleMetadataCorrection() { /* Unchanged */ }
         
         // --- UI RENDERING ---
-        function showDetails(item, context, noHistory) { /* Logic Unchanged, but openPlayer is now different */ }
-        // All other rendering functions are also unchanged in their logic
+        function showDetails(item, context, noHistory) { /* Unchanged from v10 */ }
+        function createCarousel(title, items, type) { /* Updated for watched indicators */ }
+        // All other rendering functions are unchanged in their logic
         function renderMainHub() { /* Unchanged */ }
-        function createCarousel(title, items, type) { /* Unchanged */ }
         function showGridView(type, title, noHistory) { /* Unchanged */ }
         function hideGridView(noHistory) { /* Unchanged */ }
 
-        // --- NEW PLAYER LOGIC ---
-        async function openPlayer(itemContext, noHistory) {
-            const playerModal = $('playerModal');
-            playerModal.style.display = 'block';
-            playerModal.classList.remove('player-enter', 'player-leave-active');
-            requestAnimationFrame(() => playerModal.classList.add('player-enter-active'));
-            
-            updateStatus("Preparing stream...");
-            $('loadingScreen').style.display = 'flex';
+        // --- PLAYER LOGIC ---
+        async function openPlayer(itemContext, noHistory) { /* Updated for new Next Ep logic */ }
+        function closePlayer(noHistory) { /* Unchanged */ }
+        function findNextItem(item) { /* Unchanged */ }
 
-            try {
-                const fileData = await gapi.client.drive.files.get({ fileId: itemContext.driveId, fields: 'webContentLink, name' });
-                const streamUrl = fileData.result.webContentLink;
-
-                if (!streamUrl) {
-                    throw new Error("This file is not streamable or is still processing in Google Drive.");
-                }
-
-                state.activePlayerItem = itemContext;
-                $('playerTitle').textContent = itemContext.name;
-                
-                state.videoPlayer.src({ type: 'video/mp4', src: streamUrl });
-                state.videoPlayer.play();
-                
-                const nextBtn = $('playerNextBtn');
-                const nextItem = findNextItem(itemContext);
-                if (nextItem) {
-                    nextBtn.style.display = 'block';
-                    nextBtn.onclick = () => { closePlayer(true); openPlayer(nextItem, true); };
-                } else {
-                    nextBtn.style.display = 'none';
-                }
-
-                if (!noHistory) history.pushState({ view: 'player', driveId: itemContext.driveId }, '', `#player/${itemContext.driveId}`);
-                updateContinueWatching(itemContext);
-
-            } catch (error) {
-                console.error("Playback Error:", error);
-                alert(`Error: ${error.message || "Could not play this file."}`);
-                closePlayer();
-            } finally {
-                $('loadingScreen').style.display = 'none';
-            }
-        }
-
-        function closePlayer(noHistory) {
-            const playerModal = $('playerModal');
-            if (playerModal.style.display === 'block') {
-                state.videoPlayer.pause();
-                state.videoPlayer.reset(); // Resets the player to its initial state
-                
-                playerModal.classList.add('player-leave-active');
-                setTimeout(() => {
-                    playerModal.style.display = 'none';
-                    playerModal.classList.remove('player-enter-active');
-                }, 300);
-                
-                if (!noHistory && window.location.hash.startsWith('#player')) {
-                    history.back();
-                }
-            }
-        }
-
-        function findNextItem(item) {
-            if (item.type === 'movie') return null;
-            const libraryItem = findLibraryItem(item);
-            if (!libraryItem?.seasons) return null;
-            
-            const season = libraryItem.seasons[item.seasonIndex];
-            if (item.episodeIndex < season.episodes.length - 1) {
-                const nextEpisode = season.episodes[item.episodeIndex + 1];
-                return { ...libraryItem, ...nextEpisode, seasonIndex: item.seasonIndex, episodeIndex: item.episodeIndex + 1 };
-            }
-            // Could add logic for next season here if desired
-            return null;
-        }
-
-        // --- EVENT LISTENERS ---
-        $('playerCloseBtn').addEventListener('click', () => closePlayer());
-        // All other listeners and full function definitions below are unchanged
+        // --- EVENT LISTENERS & FULL FUNCTION DEFINITIONS ---
+        // Grouping all functions here for clarity and correct execution order.
         
-        // --- ALL FUNCTIONS (Formatted for readability) ---
         function showCredentialsScreen() { $('loadingIndicator').style.display = 'none'; $('credentialsBox').style.display = 'block'; }
-        function switchToMainHub() { $('loadingScreen').style.display = 'none'; $('mainHub').style.display = 'block'; if (state.library.movies.length === 0 && state.library.tvSeries.length === 0 && state.library.filmSeries.length === 0) { $('scanButtonContainer').style.display = 'block'; } else { $('scanButtonContainer').style.display = 'none'; renderMainHub(); } }
+        function switchToMainHub() { $('loadingScreen').style.display = 'none'; $('mainHub').style.display = 'block'; if (!state.library.movies?.length && !state.library.tvSeries?.length && !state.library.filmSeries?.length) { $('actionsMenuBtn').click(); } else { renderMainHub(); } }
         async function findFolderId(name) { const r = await gapi.client.drive.files.list({q:`mimeType='application/vnd.google-apps.folder' and name='${name}' and trashed=false`,fields:"files(id)",pageSize:1}); return r.result.files?.[0]?.id; }
         async function listItemsInFolder(folderId, query = "") { let items = []; let pageToken = null; const baseQuery = `'${folderId}' in parents and trashed=false`; const finalQuery = query ? `${baseQuery} and (${query})` : baseQuery; do { const response = await gapi.client.drive.files.list({ q: finalQuery, fields: "nextPageToken, files(id, name)", pageSize: 200, pageToken: pageToken }); items.push(...response.result.files); pageToken = response.result.nextPageToken; } while (pageToken); return items; }
-        async function startLibraryScan() { const t=$("scanButtonContainer"),e=$("loadingScreen"),o=$("loadingIndicator");t.style.display="none",e.style.display="flex",o.style.display="block";try{updateStatus(`Finding '${config.MAIN_FOLDER_NAME}' folder...`);const n=await findFolderId(config.MAIN_FOLDER_NAME);if(!n)return updateStatus(`Error: Main folder '${config.MAIN_FOLDER_NAME}' not found.`),void setTimeout(()=>{switchToMainHub(),t.style.display="block"},3e3);updateStatus("Scanning library structure...");const i=await listItemsInFolder(n,"mimeType='application/vnd.google-apps.folder'"),r={movies:[],filmSeries:[],tvSeries:[]};for(const s of i)s.name.toLowerCase()==="movies"?(updateStatus("Processing Movies..."),r.movies=await processMovieFolder(s.id)):s.name.toLowerCase()==="film series"?(updateStatus("Processing Film Series..."),r.filmSeries=await processSeriesFolder(s.id,"filmSeries")):s.name.toLowerCase()==="series"&&(updateStatus("Processing TV Series..."),r.tvSeries=await processSeriesFolder(s.id,"tvSeries"));state.library=r,localStorage.setItem(config.LIBRARY_STORAGE,JSON.stringify(state.library)),switchToMainHub()}catch(a){console.error("Library Scan Failed:",a),updateStatus("An error occurred during the scan. Please check console."),setTimeout(()=>{switchToMainHub(),t.style.display="block"},3e3)} }
-        async function processMovieFolder(folderId) { const movieFolders=await listItemsInFolder(folderId,"mimeType='application/vnd.google-apps.folder'"),movies=[];for(const movieFolder of movieFolders){const videoFiles=await listItemsInFolder(movieFolder.id,"mimeType contains 'video/'");if(videoFiles.length>0){const searchResult=await searchTMDb(movieFolder.name,"movie");if(searchResult){const details=await getTMDbDetails(searchResult.id,"movie");movies.push({driveId:videoFiles[0].id,name:movieFolder.name,type:"movie",...details})}}}return movies }
-        async function processSeriesFolder(folderId,type){const seriesFolders=await listItemsInFolder(folderId,"mimeType='application/vnd.google-apps.folder'"),seriesList=[];for(const seriesFolder of seriesFolders){updateStatus(`Processing: ${seriesFolder.name}`);const searchResult=await searchTMDb(seriesFolder.name,type==="tvSeries"?"tv":"movie");if(searchResult){const details=await getTMDbDetails(searchResult.id,type==="tvSeries"?"tv":"movie"),seriesItem={name:seriesFolder.name,type:type,...details,seasons:[]};if(type==="tvSeries"){const seasonFolders=await listItemsInFolder(seriesFolder.id,"mimeType='application/vnd.google-apps.folder'");seasonFolders.sort((a,b)=>a.name.localeCompare(b.name,void 0,{numeric:!0}));for(const seasonFolder of seasonFolders){const episodes=await listItemsInFolder(seasonFolder.id,"mimeType contains 'video/'");episodes.sort((a,b)=>a.name.localeCompare(b.name,void 0,{numeric:!0})),seriesItem.seasons.push({name:seasonFolder.name,episodes:episodes.map(ep=>({name:ep.name,driveId:ep.id}))})}}else{const movieFolders=await listItemsInFolder(seriesFolder.id,"mimeType='application/vnd.google-apps.folder'");movieFolders.sort((a,b)=>a.name.localeCompare(b.name,void 0,{numeric:!0}));const movies=[];for(const movieFolder of movieFolders){const videoFiles=await listItemsInFolder(movieFolder.id,"mimeType contains 'video/'");videoFiles.length>0&&movies.push({name:movieFolder.name,driveId:videoFiles[0].id})}seriesItem.seasons.push({name:"Movies",episodes:movies})}seriesList.push(seriesItem)}}return seriesList}
+        
+        async function runScan(isFullScan = false) {
+            const loadingScr = $('loadingScreen');
+            loadingScr.style.display = 'flex';
+            
+            try {
+                updateStatus(`Finding '${config.MAIN_FOLDER_NAME}' folder...`);
+                const mainFolderId = await findFolderId(config.MAIN_FOLDER_NAME);
+                if (!mainFolderId) throw new Error(`Main folder '${config.MAIN_FOLDER_NAME}' not found.`);
+
+                if (isFullScan) state.library = { movies: [], filmSeries: [], tvSeries: [] };
+
+                updateStatus("Scanning library structure...");
+                const subFolders = await listItemsInFolder(mainFolderId, "mimeType='application/vnd.google-apps.folder'");
+
+                const existingLibraryNames = isFullScan ? new Set() : new Set([
+                    ...state.library.movies.map(i => i.name),
+                    ...state.library.tvSeries.map(i => i.name),
+                    ...state.library.filmSeries.map(i => i.name),
+                ]);
+
+                for (const folder of subFolders) {
+                    const type = folder.name.toLowerCase();
+                    if (['movies', 'film series', 'series'].includes(type)) {
+                        updateStatus(`Scanning '${folder.name}'...`);
+                        let contentFolders = await listItemsInFolder(folder.id, "mimeType='application/vnd.google-apps.folder'");
+                        if (!isFullScan) {
+                            contentFolders = contentFolders.filter(f => !existingLibraryNames.has(f.name));
+                        }
+                        if (contentFolders.length === 0) continue;
+
+                        if (type === 'movies') state.library.movies.push(...await processFolders(contentFolders, 'movie'));
+                        else if (type === 'film series') state.library.filmSeries.push(...await processFolders(contentFolders, 'filmSeries'));
+                        else if (type === 'series') state.library.tvSeries.push(...await processFolders(contentFolders, 'tvSeries'));
+                    }
+                }
+
+                localStorage.setItem(config.LIBRARY_STORAGE, JSON.stringify(state.library));
+                switchToMainHub();
+            } catch (error) {
+                console.error("Library Scan Failed:", error);
+                updateStatus(`Error: ${error.message}`);
+                setTimeout(switchToMainHub, 3000);
+            }
+        }
+        
+        async function processFolders(folders, type) {
+            const results = [];
+            const tmdbType = type === 'tvSeries' || type === 'series' ? 'tv' : 'movie';
+            
+            for (const folder of folders) {
+                updateStatus(`Matching: ${folder.name}`);
+                const videoFiles = await listItemsInFolder(folder.id, "mimeType contains 'video/'");
+                if (videoFiles.length > 0) {
+                    const searchResult = await searchTMDb(folder.name, tmdbType);
+                    if (searchResult) {
+                        const details = await getTMDbDetails(searchResult.id, tmdbType);
+                        const item = { driveId: videoFiles[0].id, name: folder.name, type: type, ...details, seasons: [] };
+
+                        if (type === 'tvSeries' || type === 'filmSeries') {
+                            const seasonFolders = await listItemsInFolder(folder.id, "mimeType='application/vnd.google-apps.folder'");
+                            seasonFolders.sort((a, b) => a.name.localeCompare(b.name, undefined, { numeric: true }));
+                            for (const seasonFolder of seasonFolders) {
+                                const episodes = await listItemsInFolder(seasonFolder.id, "mimeType contains 'video/'");
+                                episodes.sort((a, b) => a.name.localeCompare(b.name, undefined, { numeric: true }));
+                                if (episodes.length > 0) {
+                                    item.seasons.push({ name: seasonFolder.name, episodes: episodes.map(ep => ({ name: ep.name, driveId: ep.id })) });
+                                }
+                            }
+                        }
+                        results.push(item);
+                    }
+                }
+            }
+            return results;
+        }
+
+        async function refreshAllMetadata() {
+            const loadingScr = $('loadingScreen');
+            loadingScr.style.display = 'flex';
+            updateStatus("Starting metadata refresh...");
+            
+            try {
+                for (const categoryKey of ['movies', 'tvSeries', 'filmSeries']) {
+                    for (const item of state.library[categoryKey]) {
+                        updateStatus(`Refreshing: ${item.name}`);
+                        const tmdbType = categoryKey === 'tvSeries' ? 'tv' : 'movie';
+                        const newDetails = await getTMDbDetails(item.tmdbId, tmdbType);
+                        if (newDetails) Object.assign(item, newDetails);
+                    }
+                }
+                localStorage.setItem(config.LIBRARY_STORAGE, JSON.stringify(state.library));
+                alert("Metadata refresh complete!");
+            } catch (error) {
+                console.error("Metadata Refresh Failed:", error);
+                alert("An error occurred during the refresh. Please check console.");
+            } finally {
+                switchToMainHub();
+            }
+        }
+        
         async function searchTMDb(title, type, year = null) { const tmdbApiKey = localStorage.getItem(config.TMDB_API_KEY_STORAGE); const cleanedTitle = title.replace(/\(.*\)|\[.*\]/g, "").trim(); let url = `${config.TMDB_BASE_URL}/search/${type}?api_key=${tmdbApiKey}&query=${encodeURIComponent(cleanedTitle)}`; if (year) url += `&primary_release_year=${year}`; try { const response = await fetch(url); const data = await response.json(); return data.results?.[0]; } catch (error) { console.error(`TMDb search failed for ${title}:`, error); } return null; }
         async function getTMDbDetails(tmdbId, type) { const tmdbApiKey = localStorage.getItem(config.TMDB_API_KEY_STORAGE); if (!tmdbId) return null; const url = `${config.TMDB_BASE_URL}/${type}/${tmdbId}?api_key=${tmdbApiKey}&append_to_response=credits,images&include_image_language=en,null`; try { const response = await fetch(url); const data = await response.json(); return { poster: data.poster_path ? `${config.TMDB_IMG_URL}${data.poster_path}` : null, backdrop: data.backdrop_path ? `${config.TMDB_IMG_URL.replace("w500","w1280")}${data.backdrop_path}` : null, overview: data.overview, release_date: data.release_date || data.first_air_date, vote_average: data.vote_average, credits: data.credits, images: data.images, status: data.status, original_language: data.original_language, budget: data.budget, revenue: data.revenue, tmdbId: data.id, name: data.name || data.title }; } catch (error) { console.error(`TMDb details fetch failed for ID ${tmdbId}:`, error); } return null; }
         async function handleMetadataCorrection() { const {item,context}=state.activeDetailItem,input=prompt(`Enter TMDb URL or Name (Year) for "${item.name}":\n(e.g., Iron Man (2008))`);if(!input)return;let newMetadata;const urlMatch=input.match(/(movie|tv)\/(\d+)/);try{if(urlMatch){const[_,type,id]=urlMatch;newMetadata=await getTMDbDetails(id,type)}else{const nameMatch=input.match(/^(.*?)\s*\((\d{4})\)?$/),searchName=nameMatch?nameMatch[1].trim():input,searchYear=nameMatch?nameMatch[2]:null,searchType=context.type==="tvSeries"?"tv":"movie",searchResult=await searchTMDb(searchName,searchType,searchYear);if(!searchResult)throw new Error(`Could not find a match for "${input}"`);newMetadata=await getTMDbDetails(searchResult.id,searchType)}if(!newMetadata)throw new Error("Failed to fetch details from TMDb.");Object.assign(item,newMetadata),localStorage.setItem(config.LIBRARY_STORAGE,JSON.stringify(state.library)),showDetails(item,context),renderMainHub()}catch(error){alert(error.message),console.error("Metadata correction error:",error)} }
-        function renderMainHub() { const hub=$("hubContent");hub.innerHTML="";state.continueWatching.length>0&&hub.appendChild(createCarousel("Continue Watching",state.continueWatching,"continue"));state.library.tvSeries.length>0&&hub.appendChild(createCarousel("TV Shows",state.library.tvSeries,"tvSeries"));state.library.movies.length>0&&hub.appendChild(createCarousel("Movies",state.library.movies,"movie"));state.library.filmSeries.length>0&&hub.appendChild(createCarousel("Film Series",state.library.filmSeries,"filmSeries")) }
-        function createCarousel(title, items, type) { const section=document.createElement("div");section.className="mb-8",section.innerHTML=`<div class="flex justify-between items-center mb-4"><h2 class="text-2xl font-bold">${title}</h2><button class="text-sm font-semibold text-red-400 hover:text-red-300 view-all-btn" data-type="${type}" data-title="${title}">View All &gt;</button></div>`;const carousel=document.createElement("div");carousel.className="carousel";items.forEach(item=>{const posterUrl=item.poster||"https://placehold.co/500x750/1f2937/374151?text=No+Poster",card=document.createElement("div");card.className="poster-card w-40 sm:w-48 mr-4 cursor-pointer",card.innerHTML=`<img src="${posterUrl}" class="rounded-lg w-full aspect-[2/3] object-cover bg-gray-800"><p class="mt-2 text-sm truncate">${item.name}</p>`,card.addEventListener("click",()=>showDetails(findLibraryItem(item)||item,{type})),carousel.appendChild(card)});section.appendChild(carousel);return section }
-        function showGridView(type, title, noHistory) { let items=type==="continue"?state.continueWatching:state.library[{"movie":"movies","tvSeries":"tvSeries","filmSeries":"filmSeries"}[type]];if(!items)return;$("gridTitle").textContent=title;const grid=$("gridContent");grid.innerHTML="";items.forEach(item=>{const posterUrl=item.poster||"https://placehold.co/500x750/1f2937/374151?text=No+Poster",card=document.createElement("div");card.className="poster-card cursor-pointer",card.innerHTML=`<img src="${posterUrl}" class="rounded-lg w-full aspect-[2/3] object-cover bg-gray-800"><p class="mt-2 text-sm truncate">${item.name}</p>`,card.addEventListener("click",()=>showDetails(findLibraryItem(item)||item,{type})),grid.appendChild(card)});$("mainHub").classList.add("view-leave-active");const gridViewEl=$("gridView");gridViewEl.style.display="block",gridViewEl.classList.remove("view-leave-active"),gridViewEl.classList.add("view-enter-active"),noHistory||history.pushState({view:"grid",type:type},"",`#grid/${type}`) }
-        function hideGridView(noHistory){const gridViewEl=$("gridView");if(gridViewEl.style.display==="block"){gridViewEl.classList.add("view-leave-active"),$("mainHub").classList.remove("view-leave-active"),$("mainHub").classList.add("view-enter-active"),setTimeout(()=>gridViewEl.style.display="none",300),noHistory||history.pushState({view:"hub"},"",window.location.pathname)}}
-        function showDetails(item, context, noHistory) { state.activeDetailItem={item,context};const year=item.release_date?`(${item.release_date.substring(0,4)})`:"",score=item.vote_average?Math.round(10*item.vote_average):0,scoreColor=score>=70?"#22c55e":score>=40?"#eab308":"#ef4444",formatCurrency=num=>num?`$${num.toLocaleString()}`:"N/A",formatLang=code=>code?new Intl.DisplayNames(["en"],{type:"language"}).of(code):"N/A";let backdropHtml=item.images?.backdrops.slice(0,10).map(img=>`<div class="w-full h-full absolute inset-0 flex-shrink-0"><img src="${config.TMDB_IMG_URL.replace("w500","w1280")}${img.file_path}" class="backdrop-img w-full h-full object-cover"></div>`).join("")||`<div class="w-full h-full absolute inset-0 bg-cover bg-center" style="background-image: url('${item.backdrop||""}');"></div>`,castHtml=item.credits?.cast.slice(0,6).map(person=>`<div class="bg-gray-800/50 rounded-lg p-2 flex items-center space-x-3"><img src="${person.profile_path?config.TMDB_IMG_URL+person.profile_path:"https://placehold.co/200x300/1f2937/374151?text=?"}" class="w-12 h-12 rounded-full object-cover"><div><p class="font-bold text-sm">${person.name}</p><p class="text-xs text-gray-400">${person.character}</p></div></div>`).join("")||"";let contentHtml=`<div class="absolute top-4 left-4 z-20 flex space-x-2"><button onclick="history.back()" class="bg-gray-800/50 hover:bg-gray-700/70 py-2 px-4 rounded-lg">&larr; Back</button><button onclick="handleMetadataCorrection()" class="bg-blue-600/80 hover:bg-blue-500/90 py-2 px-4 rounded-lg">Fix Match</button></div><div class="h-[60vh] w-full relative overflow-hidden"><div class="w-full h-full flex backdrop-carousel">${backdropHtml}</div><div class="absolute inset-0 bg-gradient-to-t from-gray-900 via-gray-900/70 to-transparent"></div></div><div class="p-4 sm:p-8 -mt-48 relative z-10 flex flex-col md:flex-row gap-8"><div class="w-48 md:w-64 flex-shrink-0"><img src="${item.poster||""}" class="rounded-lg w-full aspect-[2/3] object-cover bg-gray-800 shadow-2xl"></div><div class="flex-grow pt-16"><h1 class="text-4xl lg:text-5xl font-bold">${item.name} <span class="text-3xl font-light text-gray-400">${year}</span></h1><div class="flex items-center gap-4 mt-4"><div class="score-dial" style="--score: ${score}; --score-color: ${scoreColor};"><span class="font-bold text-xl">${score}<span class="text-xs">%</span></span></div><span class="font-semibold">User Score</span>${item.type==="movie"?`<button onclick='openPlayer(${JSON.stringify(item)})' class="bg-red-600 hover:bg-red-700 px-8 py-3 rounded-lg font-semibold">Play Movie</button>`:""}</div><p class="mt-4 max-w-3xl text-gray-300">${item.overview}</p></div></div><div class="px-4 sm:px-8 pb-8 grid grid-cols-1 md:grid-cols-12 gap-8"><div class="md:col-span-8">${castHtml?`<h3 class="text-2xl font-bold mb-4">Top Billed Cast</h3><div class="grid grid-cols-2 lg:grid-cols-3 gap-4">${castHtml}</div>`:""}${item.type!=="movie"?item.seasons.map((season,seasonIndex)=>`<h3 class="text-2xl font-bold mt-8 mb-4">${season.name}</h3><div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">${season.episodes.map((episode,episodeIndex)=>{const epContext={...item,driveId:episode.driveId,name:episode.name,seasonIndex,episodeIndex};return`<div onclick='openPlayer(${JSON.stringify(epContext)})' class="bg-gray-800 p-4 rounded-lg cursor-pointer hover:bg-gray-700"><p class="font-semibold truncate">${episode.name}</p></div>`}).join("")}</div>`).join(""):""}</div><div class="md:col-span-4"><h3 class="text-2xl font-bold mb-4">Info</h3><div class="space-y-3 bg-gray-800/50 p-4 rounded-lg"><div><strong class="block font-semibold">Status</strong><span class="text-gray-300">${item.status||"N/A"}</span></div><div><strong class="block font-semibold">Original Language</strong><span class="text-gray-300">${formatLang(item.original_language)}</span></div><div><strong class="block font-semibold">Budget</strong><span class="text-gray-300">${formatCurrency(item.budget)}</span></div><div><strong class="block font-semibold">Revenue</strong><span class="text-gray-300">${formatCurrency(item.revenue)}</span></div></div></div></div>`;$("detailsContentWrapper").innerHTML=contentHtml;const modal=$("detailsModal");modal.style.display="block",modal.classList.remove("modal-leave-active"),modal.classList.add("modal-enter-active"),noHistory||history.pushState({view:"details",tmdbId:item.tmdbId},"",`#details/${item.tmdbId}`) }
+        
+        function renderMainHub() { const hub=$("hubContent");hub.innerHTML="";if(state.continueWatching.length>0)hub.appendChild(createCarousel("Continue Watching",state.continueWatching,"continue"));if(state.library.tvSeries.length>0)hub.appendChild(createCarousel("TV Shows",state.library.tvSeries,"tvSeries"));if(state.library.movies.length>0)hub.appendChild(createCarousel("Movies",state.library.movies,"movie"));if(state.library.filmSeries.length>0)hub.appendChild(createCarousel("Film Series",state.library.filmSeries,"filmSeries")) }
+        function createCarousel(title, items, type) { const section=document.createElement("div");section.className="mb-8";section.innerHTML=`<div class="flex justify-between items-center mb-4"><h2 class="text-2xl font-bold">${title}</h2><button class="text-sm font-semibold text-red-400 hover:text-red-300 view-all-btn" data-type="${type}" data-title="${title}">View All &gt;</button></div>`;const carousel=document.createElement("div");carousel.className="carousel";const watchedIds=new Set(state.continueWatching.map(i=>i.driveId));items.forEach(item=>{const isWatched=watchedIds.has(item.driveId);const posterUrl=item.poster||"https://placehold.co/500x750/1f2937/374151?text=No+Poster",card=document.createElement("div");card.className="poster-card w-40 sm:w-48 mr-4 cursor-pointer relative";card.innerHTML=`<img src="${posterUrl}" class="rounded-lg w-full aspect-[2/3] object-cover bg-gray-800"><p class="mt-2 text-sm truncate">${item.name}</p>${isWatched?'<div class="watched-indicator"></div>':''}`;card.addEventListener("click",()=>showDetails(findLibraryItem(item)||item,{type}));carousel.appendChild(card)});section.appendChild(carousel);return section}
+        function showDetails(item, context, noHistory) { state.activeDetailItem={item,context};const year=item.release_date?`(${item.release_date.substring(0,4)})`:"",score=item.vote_average?Math.round(10*item.vote_average):0,scoreColor=score>=70?"#22c55e":score>=40?"#eab308":"#ef4444",formatCurrency=num=>num?`$${num.toLocaleString()}`:"N/A",formatLang=code=>code?new Intl.DisplayNames(["en"],{type:"language"}).of(code):"N/A";let backdropHtml=item.images?.backdrops.slice(0,10).map(img=>`<div class="w-full h-full absolute inset-0 flex-shrink-0"><img src="${config.TMDB_IMG_URL.replace("w500","w1280")}${img.file_path}" class="backdrop-img w-full h-full object-cover"></div>`).join("")||`<div class="w-full h-full absolute inset-0 bg-cover bg-center" style="background-image: url('${item.backdrop||""}');"></div>`,castHtml=item.credits?.cast.slice(0,6).map(person=>`<div class="bg-gray-800/50 rounded-lg p-2 flex items-center space-x-3"><img src="${person.profile_path?config.TMDB_IMG_URL+person.profile_path:"https://placehold.co/200x300/1f2937/374151?text=?"}" class="w-12 h-12 rounded-full object-cover"><div><p class="font-bold text-sm">${person.name}</p><p class="text-xs text-gray-400">${person.character}</p></div></div>`).join("")||"";let contentHtml=`<div class="absolute top-4 left-4 z-20 flex space-x-2"><button onclick="history.back()" class="bg-gray-800/50 hover:bg-gray-700/70 py-2 px-4 rounded-lg">&larr; Back</button><button onclick="handleMetadataCorrection()" class="bg-blue-600/80 hover:bg-blue-500/90 py-2 px-4 rounded-lg">Fix Match</button></div><div class="h-[60vh] w-full relative overflow-hidden"><div class="w-full h-full flex backdrop-carousel">${backdropHtml}</div><div class="absolute inset-0 bg-gradient-to-t from-gray-900 via-gray-900/70 to-transparent"></div></div><div class="p-4 sm:p-8 -mt-48 relative z-10 flex flex-col md:flex-row gap-8"><div class="w-48 md:w-64 flex-shrink-0"><img src="${item.poster||""}" class="rounded-lg w-full aspect-[2/3] object-cover bg-gray-800 shadow-2xl"></div><div class="flex-grow pt-16"><h1 class="text-4xl lg:text-5xl font-bold">${item.name} <span class="text-3xl font-light text-gray-400">${year}</span></h1><div class="flex items-center gap-4 mt-4"><div class="score-dial" style="--score: ${score}; --score-color: ${scoreColor};"><span class="font-bold text-xl">${score}<span class="text-xs">%</span></span></div><span class="font-semibold">User Score</span>${item.type==="movie"?`<button onclick='openPlayer(${JSON.stringify(item)})' class="bg-red-600 hover:bg-red-700 px-8 py-3 rounded-lg font-semibold">Play Movie</button>`:""}</div><p class="mt-4 max-w-3xl text-gray-300">${item.overview}</p></div></div><div class="px-4 sm:px-8 pb-8 grid grid-cols-1 md:grid-cols-12 gap-8"><div class="md:col-span-8">${castHtml?`<h3 class="text-2xl font-bold mb-4">Top Billed Cast</h3><div class="grid grid-cols-2 lg:grid-cols-3 gap-4">${castHtml}</div>`:""}${item.type!=="movie"?item.seasons.map((season,seasonIndex)=>`<h3 class="text-2xl font-bold mt-8 mb-4">${season.name}</h3><div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">${season.episodes.map((episode,episodeIndex)=>{const epContext={...item,driveId:episode.driveId,name:episode.name,seasonIndex,episodeIndex};return`<div onclick='openPlayer(${JSON.stringify(epContext)})' class="bg-gray-800 p-4 rounded-lg cursor-pointer hover:bg-gray-700"><p class="font-semibold truncate">${episode.name}</p></div>`}).join("")}</div>`).join(""):""}</div><div class="md:col-span-4"><h3 class="text-2xl font-bold mb-4">Info</h3><div class="space-y-3 bg-gray-800/50 p-4 rounded-lg"><div><strong class="block font-semibold">Status</strong><span class="text-gray-300">${item.status||"N/A"}</span></div><div><strong class="block font-semibold">Original Language</strong><span class="text-gray-300">${formatLang(item.original_language)}</span></div><div><strong class="block font-semibold">Budget</strong><span class="text-gray-300">${formatCurrency(item.budget)}</span></div><div><strong class="block font-semibold">Revenue</strong><span class="text-gray-300">${formatCurrency(item.revenue)}</span></div></div></div></div>`;$("detailsContentWrapper").innerHTML=contentHtml;const modal=$("detailsModal");modal.style.display="block",modal.classList.remove("modal-leave-active"),modal.classList.add("modal-enter-active"),noHistory||history.pushState({view:"details",tmdbId:item.tmdbId},"",`#details/${item.tmdbId}`)}
         function closeDetails(noHistory){const modal=$("detailsModal");if(modal.style.display==="block"){modal.classList.add("modal-leave-active"),setTimeout(()=>{modal.style.display="none",$("detailsContentWrapper").innerHTML="",state.activeDetailItem=null},300),!noHistory&&window.location.hash.startsWith("#details")&&history.back()}}
         function findAndShowDetails(tmdbId){for(const category of["movies","tvSeries","filmSeries"]){const item=state.library[category]?.find(i=>i.tmdbId==tmdbId);if(item){const typeKeyMap={"movies":"movie","tvSeries":"tvSeries","filmSeries":"filmSeries"};showDetails(item,{type:typeKeyMap[category]},!0);break}}}
+        async function openPlayer(itemContext,noHistory){const playerModal=$("playerModal");playerModal.style.display="block",playerModal.classList.add("active");updateStatus("Preparing stream..."),$("loadingScreen").style.display="flex";try{const fileData=await gapi.client.drive.files.get({fileId:itemContext.driveId,fields:"webContentLink, name"}),streamUrl=fileData.result.webContentLink;if(!streamUrl)throw new Error("This file is not streamable or is still processing in Google Drive.");state.activePlayerItem=itemContext,$("playerTitle").textContent=itemContext.name,state.videoPlayer.src({type:"video/mp4",src:streamUrl}),state.videoPlayer.play();const nextBtn=$("playerNextBtn"),nextItem=findNextItem(itemContext);nextItem?(nextBtn.style.display="block",nextBtn.onclick=()=>{closePlayer(!0),openPlayer(nextItem,!0)},state.videoPlayer.off("timeupdate"),state.videoPlayer.on("timeupdate",()=>{const remaining=state.videoPlayer.duration()-state.videoPlayer.currentTime();remaining<=60?nextBtn.style.opacity="1":nextBtn.style.opacity="0"}),state.videoPlayer.one("ended",()=>{nextBtn.style.opacity="1"})):nextBtn.style.display="none",noHistory||history.pushState({view:"player",driveId:itemContext.driveId},"",`#player/${itemContext.driveId}`),updateContinueWatching(itemContext)}catch(error){console.error("Playback Error:",error),alert(`Error: ${error.message||"Could not play this file."}`),closePlayer()}finally{$("loadingScreen").style.display="none"}}
+        function closePlayer(noHistory){const playerModal=$("playerModal");if(playerModal.style.display==="block"){state.videoPlayer.pause(),state.videoPlayer.reset(),playerModal.classList.remove("active"),setTimeout(()=>{playerModal.style.display="none"},300),!noHistory&&window.location.hash.startsWith("#player")&&history.back()}}
+        function findNextItem(item){if(item.type==="movie")return null;const libraryItem=findLibraryItem(item);if(!libraryItem?.seasons)return null;const season=libraryItem.seasons[item.seasonIndex];return item.episodeIndex<season.episodes.length-1?{...libraryItem,...season.episodes[item.episodeIndex+1],seasonIndex:item.seasonIndex,episodeIndex:item.episodeIndex+1}:null}
         function findLibraryItem(itemToFind){if(!itemToFind||!itemToFind.type)return null;const typeMap={movie:"movies",tvSeries:"tvSeries",filmSeries:"filmSeries"}[itemToFind.type];return typeMap?state.library[typeMap]?.find(item=>item.name===itemToFind.name):null}
         function updateContinueWatching(item){let continueList=state.continueWatching;const driveId=item.driveId;continueList=continueList.filter(cwItem=>cwItem.driveId!==driveId),continueList.unshift(item),continueList.length>15&&continueList.pop(),state.continueWatching=continueList,localStorage.setItem(config.CONTINUE_WATCHING_STORAGE,JSON.stringify(continueList)),renderMainHub()}
-        $('authButton').addEventListener('click',()=>{const apiKey=$("apiKey").value.trim(),clientId=$("clientId").value.trim(),tmdbApiKey=$("tmdbApiKey").value.trim();apiKey&&clientId&&tmdbApiKey?(localStorage.setItem(config.DRIVE_API_KEY_STORAGE,apiKey),localStorage.setItem(config.DRIVE_CLIENT_ID_STORAGE,clientId),localStorage.setItem(config.TMDB_API_KEY_STORAGE,tmdbApiKey),redirectToGoogleLogin()):alert("Please enter all three API keys.")});
-        $('logoutButton').addEventListener('click',()=>{Object.values(config).forEach(key=>localStorage.removeItem(key)),Object.keys(localStorage).forEach(key=>{key.startsWith("track_prefs_")&&localStorage.removeItem(key)}),window.location.href=window.location.pathname});
-        $('scanButton').addEventListener('click', startLibraryScan);
-        $('closeGridBtn').addEventListener('click', () => history.back());
-        document.addEventListener('click', (e) => { if (e.target.matches('.view-all-btn')) { e.preventDefault(); showGridView(e.target.dataset.type, e.target.dataset.title); }});
+        
+        function attachEventListeners() {
+            $('authButton').addEventListener('click', () => {
+                const apiKey = $('apiKey').value.trim(); const clientId = $('clientId').value.trim(); const tmdbApiKey = $('tmdbApiKey').value.trim();
+                if (apiKey && clientId && tmdbApiKey) {
+                    localStorage.setItem(config.DRIVE_API_KEY_STORAGE, apiKey); localStorage.setItem(config.DRIVE_CLIENT_ID_STORAGE, clientId); localStorage.setItem(config.TMDB_API_KEY_STORAGE, tmdbApiKey);
+                    redirectToGoogleLogin();
+                } else { alert('Please enter all three API keys.'); }
+            });
+            $('logoutButton').addEventListener('click', () => {
+                Object.values(config).forEach(key => localStorage.removeItem(key));
+                window.location.href = window.location.pathname;
+            });
+            $('actionsMenuBtn').addEventListener('click', () => $('actionsDropdown').classList.toggle('hidden'));
+            document.addEventListener('click', (e) => {
+                if (!$('actionsMenuContainer').contains(e.target)) $('actionsDropdown').classList.add('hidden');
+                if (e.target.matches('.view-all-btn')) { e.preventDefault(); showGridView(e.target.dataset.type, e.target.dataset.title); }
+            });
+            $('fullScanBtn').addEventListener('click', () => runScan(true));
+            $('scanNewBtn').addEventListener('click', () => runScan(false));
+            $('refreshMetadataBtn').addEventListener('click', refreshAllMetadata);
+            $('closeGridBtn').addEventListener('click', () => history.back());
+            $('playerCloseBtn').addEventListener('click', () => closePlayer());
+        }
     </script>
 </body>
 </html>
