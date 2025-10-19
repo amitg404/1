@@ -85,7 +85,7 @@
     <script src="https://vjs.zencdn.net/8.10.0/video.min.js"></script>
     <script>
         // --- CONFIG, STATE & DOM ---
-        const config = { DRIVE_API_KEY_STORAGE: 'superdrivehub_v16_google_api_key', DRIVE_CLIENT_ID_STORAGE: 'superdrivehub_v16_google_client_id', TMDB_API_KEY_STORAGE: 'superdrivehub_v16_tmdb_api_key', LIBRARY_STORAGE: 'superdrivehub_v16_library_cache', CONTINUE_WATCHING_STORAGE: 'superdrivehub_v16_continue_watching', TMDB_BASE_URL: 'https://api.themoviedb.org/3', TMDB_IMG_URL: 'https://image.tmdb.org/t/p/w500', MAIN_FOLDER_NAME: 'Entertainment' };
+        const config = { DRIVE_API_KEY_STORAGE: 'superdrivehub_v17_google_api_key', DRIVE_CLIENT_ID_STORAGE: 'superdrivehub_v17_google_client_id', TMDB_API_KEY_STORAGE: 'superdrivehub_v17_tmdb_api_key', LIBRARY_STORAGE: 'superdrivehub_v17_library_cache', CONTINUE_WATCHING_STORAGE: 'superdrivehub_v17_continue_watching', TMDB_BASE_URL: 'https://api.themoviedb.org/3', TMDB_IMG_URL: 'https://image.tmdb.org/t/p/w500', MAIN_FOLDER_NAME: 'Entertainment' };
         let state = { library: { movies: [], filmSeries: [], tvSeries: [] }, continueWatching: [], activeDetailItem: null, activePlayerItem: null, videoPlayer: null, gisClient: null };
         const $ = (selector) => document.getElementById(selector);
         
@@ -93,29 +93,6 @@
         
         function updateStatus(message) { $('loadingStatus').innerText = message; }
 
-        function initializeGisClient() {
-            const CLIENT_ID = localStorage.getItem(config.DRIVE_CLIENT_ID_STORAGE);
-            if (!CLIENT_ID) {
-                showCredentialsScreen();
-                return;
-            }
-            try {
-                state.gisClient = google.accounts.oauth2.initTokenClient({
-                    client_id: CLIENT_ID,
-                    scope: 'https://www.googleapis.com/auth/drive.readonly',
-                    callback: (tokenResponse) => {
-                        if (tokenResponse && tokenResponse.access_token) {
-                            gapi.client.setToken(tokenResponse);
-                            initializeGapiClient();
-                        }
-                    },
-                });
-                showCredentialsScreen();
-            } catch (error) {
-                console.error("Error initializing Google Identity Services:", error);
-                alert("Could not initialize Google Sign-In. This might be due to an ad blocker or browser privacy settings.");
-            }
-        }
         function handleAuthClick() {
             const apiKey = $('apiKey').value.trim();
             const clientId = $('clientId').value.trim();
@@ -125,19 +102,33 @@
                 localStorage.setItem(config.DRIVE_CLIENT_ID_STORAGE, clientId);
                 localStorage.setItem(config.TMDB_API_KEY_STORAGE, tmdbApiKey);
 
-                if (state.gisClient) {
+                try {
+                    // Initialize the GIS client right before we need it
+                    state.gisClient = google.accounts.oauth2.initTokenClient({
+                        client_id: clientId,
+                        scope: 'https://www.googleapis.com/auth/drive.readonly',
+                        callback: (tokenResponse) => {
+                            if (tokenResponse && tokenResponse.access_token) {
+                                // Once we get the token, load GAPI
+                                gapi.load('client', () => initializeGapiClient(tokenResponse));
+                            }
+                        },
+                    });
+                    // Immediately request the token
                     state.gisClient.requestAccessToken();
-                } else {
-                    alert("Google Sign-In is not ready. Please wait a moment and try again.");
-                    // Re-initialize in case it failed silently
-                    initializeGisClient();
+                } catch (error) {
+                    console.error("Error initializing or using Google Identity Services:", error);
+                    alert("Could not start Google Sign-In. This might be due to an ad blocker, browser privacy settings, or an invalid Client ID.");
                 }
             } else {
                 alert('Please enter all three API keys.');
             }
         }
-        async function initializeGapiClient() {
+        async function initializeGapiClient(tokenResponse) {
             try {
+                // Set the token for GAPI to use
+                gapi.client.setToken(tokenResponse);
+
                 updateStatus("Initializing Drive API...");
                 await gapi.client.init({ apiKey: localStorage.getItem(config.DRIVE_API_KEY_STORAGE), discoveryDocs: ['https://www.googleapis.com/discovery/v1/apis/drive/v3/rest'] });
                 switchToMainHub();
@@ -495,12 +486,13 @@
         // --- GAPI INITIALIZATION CALLBACK ---
         function onGapiLoad() {
             // This is the entry point called by the Google API script tag once it's loaded.
-            gapi.load('client', initializeApp);
+            // It runs before initializeApp.
+            initializeApp();
         }
 
         // --- MAIN APP STARTUP FUNCTION ---
         function initializeApp() {
-            // This function runs after GAPI is ready, but before the user has signed in.
+            // This function now only handles setup that doesn't require Google APIs
             $('apiKey').value = localStorage.getItem(config.DRIVE_API_KEY_STORAGE) || '';
             $('clientId').value = localStorage.getItem(config.DRIVE_CLIENT_ID_STORAGE) || '';
             $('tmdbApiKey').value = localStorage.getItem(config.TMDB_API_KEY_STORAGE) || '';
@@ -515,11 +507,10 @@
             
             attachEventListeners();
             
-            // This is now the main entry point for authentication logic.
-            initializeGisClient();
+            // This is now the main entry point for the app logic.
+            // It will check if there's already a token or show the login screen.
+            showCredentialsScreen();
         }
     </script>
 </body>
 </html>
-
-
