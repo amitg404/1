@@ -3,9 +3,12 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Super Drive Hub v15</title>
+    <title>Super Drive Hub v16</title>
     <script src="https://cdn.tailwindcss.com"></script>
-    <script src="https://apis.google.com/js/api.js?onload=onGapiLoad" async defer></script>
+    <!-- NEW: Google Identity Services (GSI) Client -->
+    <script src="https://accounts.google.com/gsi/client" async defer></script>
+    <!-- GAPI script is still needed for the Drive API itself -->
+    <script src="https://apis.google.com/js/api.js" async defer></script>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
     <link href="https://vjs.zencdn.net/8.10.0/video-js.css" rel="stylesheet" />
     <link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>🍿</text></svg>">
@@ -83,26 +86,38 @@
     <script src="https://vjs.zencdn.net/8.10.0/video.min.js"></script>
     <script>
         // --- CONFIG, STATE & DOM ---
-        const config = { DRIVE_API_KEY_STORAGE: 'superdrivehub_v15_google_api_key', DRIVE_CLIENT_ID_STORAGE: 'superdrivehub_v15_google_client_id', TMDB_API_KEY_STORAGE: 'superdrivehub_v15_tmdb_api_key', LIBRARY_STORAGE: 'superdrivehub_v15_library_cache', CONTINUE_WATCHING_STORAGE: 'superdrivehub_v15_continue_watching', TMDB_BASE_URL: 'https://api.themoviedb.org/3', TMDB_IMG_URL: 'https://image.tmdb.org/t/p/w500', MAIN_FOLDER_NAME: 'Entertainment' };
-        let state = { library: { movies: [], filmSeries: [], tvSeries: [] }, continueWatching: [], activeDetailItem: null, activePlayerItem: null, videoPlayer: null };
+        const config = { DRIVE_API_KEY_STORAGE: 'superdrivehub_v16_google_api_key', DRIVE_CLIENT_ID_STORAGE: 'superdrivehub_v16_google_client_id', TMDB_API_KEY_STORAGE: 'superdrivehub_v16_tmdb_api_key', LIBRARY_STORAGE: 'superdrivehub_v16_library_cache', CONTINUE_WATCHING_STORAGE: 'superdrivehub_v16_continue_watching', TMDB_BASE_URL: 'https://api.themoviedb.org/3', TMDB_IMG_URL: 'https://image.tmdb.org/t/p/w500', MAIN_FOLDER_NAME: 'Entertainment' };
+        let state = { library: { movies: [], filmSeries: [], tvSeries: [] }, continueWatching: [], activeDetailItem: null, activePlayerItem: null, videoPlayer: null, gisClient: null };
         const $ = (selector) => document.getElementById(selector);
         
         // --- ALL FUNCTION DEFINITIONS ---
-        // Grouping all function definitions at the top solves execution order errors.
         
         function updateStatus(message) { $('loadingStatus').innerText = message; }
 
-        function handleRedirect() {
-            const fragment = new URLSearchParams(window.location.hash.substring(1));
-            const token = fragment.get('access_token');
-            if (token) {
-                gapi.client.setToken({ access_token: token });
-                window.history.replaceState({}, document.title, window.location.pathname);
-                initializeGapiClient();
-            } else if (localStorage.getItem(config.DRIVE_CLIENT_ID_STORAGE)) {
+        // NEW: Popup Authentication Logic
+        function initializeGisClient() {
+            const CLIENT_ID = localStorage.getItem(config.DRIVE_CLIENT_ID_STORAGE);
+            if (!CLIENT_ID) {
                 showCredentialsScreen();
+                return;
+            }
+            state.gisClient = google.accounts.oauth2.initTokenClient({
+                client_id: CLIENT_ID,
+                scope: 'https://www.googleapis.com/auth/drive.readonly',
+                callback: (tokenResponse) => {
+                    gapi.client.setToken(tokenResponse);
+                    initializeGapiClient();
+                },
+            });
+            showCredentialsScreen();
+        }
+        function handleAuthClick() {
+            if (state.gisClient) {
+                // Prompt the user to select a Google Account and ask for consent to share their data
+                // when establishing a new session.
+                state.gisClient.requestAccessToken();
             } else {
-                showCredentialsScreen();
+                alert("Google Identity Service not ready. Please wait a moment and try again.");
             }
         }
         async function initializeGapiClient() {
@@ -115,13 +130,6 @@
                 alert("Failed to initialize Google Drive API."); 
                 showCredentialsScreen();
             }
-        }
-        function redirectToGoogleLogin() {
-            const CLIENT_ID = localStorage.getItem(config.DRIVE_CLIENT_ID_STORAGE);
-            const REDIRECT_URI = window.location.href.split('#')[0];
-            const SCOPE = 'https://www.googleapis.com/auth/drive.readonly';
-            const authUrl = `https://accounts.google.com/o/oauth2/v2/auth?client_id=${CLIENT_ID}&redirect_uri=${encodeURIComponent(REDIRECT_URI)}&scope=${SCOPE}&response_type=token`;
-            window.location.href = authUrl;
         }
 
         function handlePopState() {
@@ -454,7 +462,7 @@
         }
         function findLibraryItem(itemToFind) {
             if (!itemToFind || !itemToFind.type) return null;
-            const typeMap = { movie: "movies", tvSeries: "tvSeries", filmSeries: "filmSeries" };
+            const typeMap = { "movie": "movies", "tvSeries": "tvSeries", "filmSeries": "filmSeries" };
             const category = typeMap[itemToFind.type];
             return category ? state.library[category]?.find(item => item.name === itemToFind.name) : null;
         }
@@ -470,19 +478,7 @@
         }
 
         function attachEventListeners() {
-            $('authButton').addEventListener('click', () => {
-                const apiKey = $('apiKey').value.trim(); 
-                const clientId = $('clientId').value.trim(); 
-                const tmdbApiKey = $('tmdbApiKey').value.trim();
-                if (apiKey && clientId && tmdbApiKey) {
-                    localStorage.setItem(config.DRIVE_API_KEY_STORAGE, apiKey); 
-                    localStorage.setItem(config.DRIVE_CLIENT_ID_STORAGE, clientId); 
-                    localStorage.setItem(config.TMDB_API_KEY_STORAGE, tmdbApiKey);
-                    redirectToGoogleLogin();
-                } else { 
-                    alert('Please enter all three API keys.');
-                }
-            });
+            $('authButton').addEventListener('click', handleAuthClick);
             $('logoutButton').addEventListener('click', () => {
                 Object.values(config).forEach(key => localStorage.removeItem(key));
                 window.location.href = window.location.pathname;
@@ -504,9 +500,7 @@
             gapi.load('client', initializeApp);
         }
 
-        // --- MAIN APP STARTUP FUNCTION ---
         function initializeApp() {
-            // All the code that used to be in window.onload is now here.
             $('apiKey').value = localStorage.getItem(config.DRIVE_API_KEY_STORAGE) || '';
             $('clientId').value = localStorage.getItem(config.DRIVE_CLIENT_ID_STORAGE) || '';
             $('tmdbApiKey').value = localStorage.getItem(config.TMDB_API_KEY_STORAGE) || '';
@@ -520,8 +514,9 @@
             state.videoPlayer = videojs('player-video', { controls: true, autoplay: false, preload: 'auto' });
             
             attachEventListeners();
-            handlePopState();
-            handleRedirect();
+            
+            // This is now the entry point for authentication.
+            initializeGisClient();
         }
     </script>
 </body>
